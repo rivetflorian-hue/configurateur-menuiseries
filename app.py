@@ -2,14 +2,21 @@ import streamlit as st
 import math
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(page_title="FenêtrePro V72 - Rendu Final", layout="wide")
+st.set_page_config(page_title="FenêtrePro V73 - Sidebar Large", layout="wide")
 
-# --- CSS PERSONNALISÉ ---
+# --- CSS PERSONNALISÉ (AVEC SIDEBAR ÉLARGIE) ---
 st.markdown("""
     <style>
     .main { background-color: #f5f7f9; }
     h1, h2, h3, h4 { color: #2c3e50; }
     .stApp { max-width: 100%; }
+    
+    /* FORCE LA LARGEUR DE LA SIDEBAR */
+    section[data-testid="stSidebar"] {
+        width: 35% !important; /* Environ 1/3 de l'écran */
+        min-width: 450px !important; /* Largeur minimum confortable */
+    }
+    
     div.row-widget.stRadio > div { flex-direction: row; }
     .metric-box {
         background-color: #e8f4f8;
@@ -326,7 +333,7 @@ with st.sidebar.expander("4. Structure & Finitions", expanded=True):
             zones_config.append({'type': t_d, 'params': p_d, 'x': w_gauche, 'y': 0, 'w': w_droite, 'h': h_menuiserie})
 
 # --- 3. GÉNÉRATEUR SVG FINAL ---
-def generate_svg_v72():
+def generate_svg_v73():
     svg = []
     col_fin = "#D3D3D3"
     
@@ -392,7 +399,7 @@ def generate_svg_v72():
 st.markdown("<h2 class='centered-header'>Plan Technique</h2>", unsafe_allow_html=True)
 c_spacer1, c_draw, c_spacer2 = st.columns([1, 3, 1])
 with c_draw:
-    st.markdown(generate_svg_v72(), unsafe_allow_html=True)
+    st.markdown(generate_svg_v73(), unsafe_allow_html=True)
 
 st.markdown("---")
 
