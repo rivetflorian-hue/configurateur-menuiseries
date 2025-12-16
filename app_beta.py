@@ -6,6 +6,8 @@ import copy
 import pandas as pd
 import os
 
+st.set_page_config(layout="wide", page_title="Calculateur Menuiserie & Habillage")
+
 # ==============================================================================
 # --- MODULE GESTION DE PROJET (Intégré) ---
 # ==============================================================================
@@ -1076,7 +1078,8 @@ PROFILES_DB = {
         "name": "Modèle 1 (Plat / Chant)",
         "image_key": "uploaded_image_3_1765906701825.jpg",
         "params": ["A"], 
-        "defaults": {"A": 100}
+        "defaults": {"A": 100},
+        "segments": ["A"]
     },
     # 2. Cornière Simple (Ex m8)
     "m2": {
@@ -1261,244 +1264,205 @@ def generate_profile_svg(type_p, inputs, length, color_name):
                 points.append((curr_x, curr_y))
                 
     else:
-        # Logic per model (UPDATED MAPPING m1..m10)
+        # STANDARD MODELS LOGIC (M1..M10)
+        # Re-initialize points to ensure correct start for shapes like U or L
+        points = [] 
         
-        # 1. Plat (Ex m9) -> m1
-        if type_p == "m1":
-            A = inputs.get("A", 100)
-            points.append((A, 0)) # Horizontal
+        # Load params
+        defaults = PROFILES_DB[type_p]["defaults"]
+        P = lambda k: inputs.get(k, defaults.get(k, 0))
+        
+        if type_p == "m1": # Plat (A)
+             A = P("A")
+             points = [(0,0), (A, 0)]
 
-        # 2. Cornière Simple (Ex m8) -> m2
-        elif type_p == "m2":
-            A = inputs.get("A", 50)
-            B = inputs.get("B", 50)
-            points.append((0, -A)) # Up
-            points.append((points[-1][0] + B, points[-1][1])) # Right
+        elif type_p == "m2": # Cornière Simple (A, B) - L Shape
+             # Vertical A (Down), Horizontal B (Right)
+             A = P("A"); B = P("B")
+             points = [(0,0), (0, A), (B, A)]
 
-        # 3. Cornière Complexe (Ex m1) -> m3
-        elif type_p == "m3": 
-            # Seg 1: A (Up)
-            A = inputs.get("A", 50)
-            points.append((0, -A)) # P1
-            
-            A1 = inputs.get("A1", 90)
-            B = inputs.get("B", 50)
-            
-            # Rotate vector logic (Up is 0, -1)
-            # Angle from vertical (-Y) is A1.
-            # If A1=90 -> Right. If A1=100 -> Down-Right.
-            # Current direction is Up (angle -90 or 270 from +X axis).
-            # We want to turn by (180 - A1) degrees relative to the previous segment.
-            # If A1=90, turn 90. So -90 + 90 = 0 (Right).
-            # If A1=100, turn 80. So -90 + 80 = -10 (Down-Right).
-            current_angle_deg = -90 # Up
-            turn_angle_deg = 180 - A1
-            new_angle_deg = current_angle_deg + turn_angle_deg
-            
-            rad = math.radians(new_angle_deg)
-            vx = math.cos(rad)
-            vy = math.sin(rad)
-            p2 = (points[-1][0] + vx * B, points[-1][1] + vy * B)
+        elif type_p == "m3": # Cornière Complexe (A, B, A1) - Ridge/Roof
+             A = P("A"); B = P("B"); A1 = P("A1")
+             # Peak at (0,0). A is Left leg, B is Right leg. 
+             # A1 is internal angle.
+             # Angle from vertical = A1/2
+             rad = math.radians(A1/2.0)
+             # Left Point (negative X, positive Y as down)
+             p_left = (-A * math.sin(rad), A * math.cos(rad))
+             # Right Point
+             p_right = (B * math.sin(rad), B * math.cos(rad))
+             points = [p_left, (0,0), p_right]
+
+        elif type_p == "m4": # Profil en U (A, B, C) - Bucket
+             # Flange A (Up), Web B (Right), Flange C (Up)
+             A = P("A"); B = P("B"); C = P("C")
+             # Start Top-Left
+             points = [(0, -A), (0,0), (B, 0), (B, -C)]
+
+        elif type_p == "m5": # Profil en Z (A, B, C) - Step
+             # A(Right), B(Down), C(Right)
+             A = P("A"); B = P("B"); C = P("C")
+             points = [(0,0), (A, 0), (A, B), (A+C, B)]
+             
+        elif type_p == "m6": # Z Complexe / Omega (A,B,C,D, A1,A2,A3)
+             # Use Turtle for complex shapes
+             # Start (0,0). Right.
+             curr_x, curr_y = 0, 0
+             curr_ang = 0 # Right
+             points = [(0,0)]
+             
+             # Segment A (Right)
+             A = P("A")
+             curr_x += A
+             points.append((curr_x, curr_y))
+             
+             # Turn A1 (Relative). A1 internal?
+             # If Z-like: A(Right), B(Slope Down).
+             # Angle A1.
+             # Turn = 180 - A1?
+             # Let's assume standard Turtle:
+             # A -> Turn -> B -> Turn -> C -> Turn -> D
+             B=P("B"); C=P("C"); D=P("D")
+             A1=P("A1"); A2=P("A2"); A3=P("A3")
+             
+             # Helper Turtle
+             def moved(l, ang_deg):
+                 fl_x = points[-1][0] + l * math.cos(math.radians(ang_deg))
+                 fl_y = points[-1][1] + l * math.sin(math.radians(ang_deg))
+                 points.append((fl_x, fl_y))
+                 return ang_deg
+
+             # A done. Current Dir 0.
+             # Turn 1: 
+             # If A1=100. Turn 80 deg. (Down-Right)
+             curr_ang += (180 - A1)
+             curr_ang = moved(B, curr_ang)
+             
+             # Turn 2:
+             curr_ang += (180 - A2)
+             curr_ang = moved(C, curr_ang)
+             
+             # Turn 3: 
+             curr_ang += (180 - A3)
+             curr_ang = moved(D, curr_ang)
+
+        elif type_p == "m7": # Cornière 3 Plis (A, B, C, A1)
+             # A(Hem), B(Leg), C(Leg)?
+             # Or A(Leg), B(Leg), C(Hem)?
+             # Let's assume: A (Small return), Angle A1, B (Leg 1), 90, C (Leg 2).
+             # Standard "3 Pli": Return -> Leg -> Leg.
+             A=P("A"); B=P("B"); C=P("C"); A1=P("A1")
+             points = [(0,0)]
+             # A (Return In/Up?)
+             # Let's do B and C as Main L.
+             # B (Vertical), C (Horizontal).
+             # A is Return on B.
+             # Start A.
+             # Point 0.
+             # Draw A. Turn A1. Draw B. Turn 90. Draw C.
+             # Direction?
+             # Start Up-Right.
+             curr_ang = -90 # Up
+             curr_x, curr_y = 0, 0
+             
+             # A (Return)
+             # Maybe starts horizontal in?
+             # Let's assume A is the small text.
+             # Draw: A -> Turn -> B -> Turn -> C.
+             # A (Right). Turn. B (Down). Turn. C (Right).
+             # If A1=90.
+             points = [(0,0), (A,0)] # A Right
+             # Turn A1 (Internal).
+             curr_ang = 0 + (180-A1)
+             vx = math.cos(math.radians(curr_ang)); vy = math.sin(math.radians(curr_ang))
+             p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
+             points.append(p2)
+             # Turn 90 (Standard Cornière)
+             # Assuming B to C is 90.
+             curr_ang += 90 
+             vx = math.cos(math.radians(curr_ang)); vy = math.sin(math.radians(curr_ang))
+             p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+             points.append(p3)
+
+        elif type_p == "m8": # Couverine (A, B, C, A1, A2)
+             # A(Drop), B(Top), C(Drop).
+             # A (Up), B (Right), C (Down) -> Inverted U shape.
+             A=P("A"); B=P("B"); C=P("C"); A1=P("A1"); A2=P("A2")
+             # Start Bottom-Left.
+             points = [(0, A)] # Start at A down
+             # Draw Up A.
+             points.append((0,0))
+             # Turn A1. Draw B.
+             # Curr Dir Up (-90).
+             # A1 internal. Turn = 180-A1.
+             # If A1=90 -> Right.
+             curr_ang = -90 + (180-A1)
+             vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+             p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
+             points.append(p2)
+             # Turn A2. Draw C.
+             curr_ang += (180-A2)
+             vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+             p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+             points.append(p3)
+
+        elif type_p == "m9": # Bavette (A, B, C, A1, A2)
+            # A(Flat), B(Slope), C(Drop)? 
+            # Or A(Up), B(Slope), C(Vertical)?
+            # Bavette: A horizontal. B Slope Down. C Vertical Down.
+            A=P("A"); B=P("B"); C=P("C"); A1=P("A1"); A2=P("A2")
+            points = [(0,0), (A,0)] # A Right
+            # Turn A1 (Obtuse usually, >90)
+            # 0 -> Turn. 180-A1? (Down)
+            # If A1=135. Turn=45 (Down Right).
+            curr_ang = 0 + (180-A1)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
             points.append(p2)
-
-        # 4. Profil en U (Ex m10) -> m4
-        elif type_p == "m4": 
-            A = inputs.get("A", 40)
-            B = inputs.get("B", 150)
-            C = inputs.get("C", 40)
-            points.append((0, -A)) # Up
-            points.append((points[-1][0] + B, points[-1][1])) # Right
-            points.append((points[-1][0], points[-1][1] + C)) # Down
-
-        # 5. Profil en Z (Ex m7) -> m5 (FIXED to be Step Z)
-        elif type_p == "m5": 
-            A = inputs.get("A", 40)
-            B = inputs.get("B", 60)
-            C = inputs.get("C", 40)
-            # Z Step: Up, Right, Up
-            points.append((0, -A)) # Up
-            points.append((points[-1][0] + B, points[-1][1])) # Right
-            points.append((points[-1][0], points[-1][1] - C)) # Up again (Y decreases)
-
-        # 6. Profil en Z Complexe (Ex m6) -> m6 (FIXED ANGLES)
-        elif type_p == "m6": 
-            A = inputs.get("A", 20)
-            B = inputs.get("B", 100)
-            C = inputs.get("C", 30)
-            D = inputs.get("D", 20)
-            
-            A1 = inputs.get("A1", 100) # Angle A-B
-            A2 = inputs.get("A2", 100) # Angle B-C
-            A3 = inputs.get("A3", 90)  # Angle C-D
-            
-            # P0->P1: Up A
-            points.append((0, -A))
-            
-            # P1->P2: B (Sloped)
-            # A1 is the internal angle between segment A (vertical up) and segment B.
-            # Previous segment direction: Up (-90 deg from +X axis).
-            # Turn angle = 180 - A1.
-            # If A1=90, turn 90 deg. New angle = -90 + 90 = 0 (Right).
-            # If A1=100, turn 80 deg. New angle = -90 + 80 = -10 (Down-Right).
-            current_angle_deg = -90 # Up
-            turn_angle_deg = 180 - A1
-            angle_b_deg = current_angle_deg + turn_angle_deg
-            
-            rad_b = math.radians(angle_b_deg)
-            vx_b = math.cos(rad_b)
-            vy_b = math.sin(rad_b)
-            points.append((points[-1][0] + vx_b * B, points[-1][1] + vy_b * B))
-            
-            # P2->P3: C (Sloped)
-            # A2 is the internal angle between segment B and segment C.
-            # Previous segment direction: angle_b_deg.
-            # Turn angle = 180 - A2.
-            angle_c_deg = angle_b_deg + (180 - A2)
-            
-            rad_c = math.radians(angle_c_deg)
-            vx_c = math.cos(rad_c)
-            vy_c = math.sin(rad_c)
-            points.append((points[-1][0] + vx_c * C, points[-1][1] + vy_c * C))
-            
-            # P3->P4: D (Sloped)
-            # A3 is the internal angle between segment C and segment D.
-            # Previous segment direction: angle_c_deg.
-            # Turn angle = 180 - A3.
-            angle_d_deg = angle_c_deg + (180 - A3)
-            
-            rad_d = math.radians(angle_d_deg)
-            vx_d = math.cos(rad_d)
-            vy_d = math.sin(rad_d)
-            points.append((points[-1][0] + vx_d * D, points[-1][1] + vy_d * D))
-            
-        # 7. Cornière 3 Plis (Ex m3) -> m7
-        elif type_p == "m7": 
-             # A - B - C generic
-             keys = [k for k in inputs if len(k)==1 and k.isupper()]
-             x, y = 0, 0
-             points = [(x,y)]
-             # Simple generic draw for now as m3 was generic
-             for k in keys:
-                 val = inputs[k]
-                 x += val * 0.7
-                 y -= val * 0.7
-                 points.append((x,y))
-
-        # 8. Couverine (Ex m2) -> m8
-        elif type_p == "m8":
-            A = inputs.get("A", 40)
-            B = inputs.get("B", 100)
-            C = inputs.get("C", 40)
-            A1 = inputs.get("A1", 135)
-            A2 = inputs.get("A2", 135)
-            
-            points.append((0, -A))
-            
-            # Current angle is -90 (Up)
-            current_angle_deg = -90
-            turn1_deg = 180 - A1
-            angle1_deg = current_angle_deg + turn1_deg
-            
-            rad1 = math.radians(angle1_deg)
-            vx1 = math.cos(rad1)
-            vy1 = math.sin(rad1)
-            p2 = (points[-1][0] + vx1 * B, points[-1][1] + vy1 * B)
-            points.append(p2)
-            
-            # Turn A2
-            turn2_deg = 180 - A2
-            angle2_deg = angle1_deg + turn2_deg
-            
-            rad2 = math.radians(angle2_deg)
-            vx2 = math.cos(rad2)
-            vy2 = math.sin(rad2)
-            p3 = (points[-1][0] + vx2 * C, points[-1][1] + vy2 * C)
+            # Turn A2. C Vertical?
+            # A2 usually 90 or similar.
+            curr_ang += (180-A2)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
             points.append(p3)
 
-        # 9. Bavette (Ex m5) -> m9
-        elif type_p == "m9":
-             # Schema: A (Up), B (Slope), C (Down), D (Return Left)
-             A = inputs.get("A", 15)
-             B = inputs.get("B", 100)
-             C = inputs.get("C", 20)
-             D = inputs.get("D", 15)
-             A1 = inputs.get("A1", 95) # Slope angle
-             
-             # P1: Up A
-             points.append((0, -A))
-             
-             # P2: Slope B (Angle A1 from vertical? or Horizontal?)
-             # Usually Bavette slope is ~10 deg.
-             # A1=95 implies 5 deg slope down.
-             # Standard Ref: Horizontal Right = 0 deg.
-             # A1 is internal angle A-B? A is Vertical Up (-90).
-             # If A1=95, Turn is 180-95=85. New angle -90+85 = -5. (Slop Down).
-             current_angle = -90
-             turn = 180 - A1
-             angle_b = current_angle + turn
-             rad_b = math.radians(angle_b)
-             
-             points.append((points[-1][0] + math.cos(rad_b)*B, points[-1][1] + math.sin(rad_b)*B))
-             
-             # P3: Down C
-             # Relative to B? Or Vertical Down?
-             # Usually vertical down.
-             points.append((points[-1][0], points[-1][1] + C))
-             
-             # P4: Return D (Left or In)
-             # Usually return is Horizontal Left or angled 'E'.
-             # Let's assume Horizontal Left "Goutte d'eau".
-             # Return angle A2? If not provided, assume 90 relative or just Horiz.
-             # Schema shows angled return. But let's simplify to Horizontal Left for D.
-             points.append((points[-1][0] - D, points[-1][1])) # Left
-
-        # 10. Z Rejet (Ex m4) -> m10
-        elif type_p == "m10":
-            # Schema: A(Horiz), B(Vert), C(Slope), D(Vert), E(Return)
-            A = inputs.get("A", 20)
-            B = inputs.get("B", 50)
-            C = inputs.get("C", 20)
-            D = inputs.get("D", 50)
-            E = inputs.get("E", 20)
-            A1 = inputs.get("A1", 90) # Angle for C?
+        elif type_p == "m10": # Z Rejet (A, B, C, D, E, A1)
+            # A, B, C, D, E
+            # A(Flat), B(Up/Down?), C(Rejet), D(Vertical), E(Return)
+            # Standard: A Right. B Vertical Up. C Slope Out. D Vertical Up. E Return.
+            # OR A Right. B Vertical Down. C Slope. D Vert. E Return.
+            # Let's look at schema logic from before.
+            # A, B, C, D...
+            # Arbitrary implementation based on typical "Z Rejet":
+            # A(Fixing), B(Offset), C(Rejet), D(Face), E(Return).
+            inputs_keys = inputs.keys()
+            # Generic chain if possible? No, need angles.
+            # Let's do simple orthogonal chain A-B-C-D-E if angles not explicit?
+            # A1 is angle.
+            points = [(0,0)]
+            # Draw A Right
+            A=P("A"); points.append((A,0))
+            # B Down
+            B=P("B"); points.append((A,B))
+            # C Slope (Rejet). Angle A1.
+            # If A1=135. Down -> Out.
+            C=P("C"); A1=P("A1")
+            curr_ang = 90 + (180-A1)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p2 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+            points.append(p2)
+            # D Down
+            D=P("D")
+            p3 = (points[-1][0], points[-1][1]+D)
+            points.append(p3)
+            # E Left (Return)
+            E=P("E")
+            p4 = (points[-1][0]-E, points[-1][1])
+            points.append(p4)
             
-            # P1: Right A
-            points.append((A, 0))
-            
-            # P2: Down B
-            points.append((points[-1][0], points[-1][1] + B))
-            
-            # P3: Slope C (Rejet)
-            # Angle A1. If B is Down (90 deg).
-            # A1=135. Turn = 180 - 135 = 45.
-            # New angle = 90 - 45 = 45 (Down Right).
-            # Let's use A1 properly.
-            # Previous dir: Down (90 deg).
-            # Turn: -(180-A1) (Clockwise/Counter? Rejet goes Out/Right).
-            # Turn Left (CCW) is positive. Rejet goes Right.
-            # Let's just calculate absolute direction: Down-Right.
-            # Assuming A1 is the internal angle between B (down) and C (slope)
-            # If A1=90, C is horizontal right.
-            # If A1=135, C is 45 deg down-right.
-            current_angle_deg = 90 # Down
-            turn_angle_deg = -(180 - A1) # Negative for clockwise turn (right)
-            angle_c_deg = current_angle_deg + turn_angle_deg
-            
-            rad_c = math.radians(angle_c_deg)
-            vx_c = math.cos(rad_c)
-            vy_c = math.sin(rad_c)
-            points.append((points[-1][0] + vx_c * C, points[-1][1] + vy_c * C))
-            
-            # P4: Down D
-            points.append((points[-1][0], points[-1][1] + D))
-            
-            # P5: Return E (Left)
-            points.append((points[-1][0] - E, points[-1][1])) # Left
-
         else:
-            # Default Fallback
-            points = [(0,0), (0, -100), (100, -100)]
-
+            # Fallback
+            points = [(0,0), (100,0), (100,100)]
 
     # Normalize coordinates to fit in View
     xs = [p[0] for p in points]
@@ -1509,14 +1473,15 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     w_shape = max_x - min_x
     h_shape = max_y - min_y
     
-    # Scale to fill 30% of SVG
-    target_size = 150
-    scale = 1.0
-    if w_shape > 0 or h_shape > 0:
-        scale = target_size / max(w_shape, h_shape, 1)
+    # Scale to fill 30% of SVG but WITH SENSITIVITY
+    target_size = 250
+    
+    # SCALING FIX: Minimum divisor 300
+    ref_dim = max(w_shape, h_shape, 300) 
+    scale = target_size / ref_dim
         
     # Project 2D Profile (Front Face)
-    ox, oy = 150, 250
+    ox, oy = 250, 300 # Centerish
     
     scaled_points = []
     for p in points:
@@ -1525,7 +1490,7 @@ def generate_profile_svg(type_p, inputs, length, color_name):
         scaled_points.append((nx, ny))
         
     # Create Back Face (Depth)
-    depth_x, depth_y = 250, -100
+    depth_x, depth_y = 150, -80
     back_points = []
     for p in scaled_points:
         back_points.append((p[0] + depth_x, p[1] + depth_y))
@@ -1533,279 +1498,263 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     # DRAW SVG
     svg_els = []
     style_line = f'stroke="black" stroke-width="2" fill="none"'
-    
-    # 1. Back lines (Wireframe) - dashed
     path_back = "M " + " L ".join([f"{p[0]},{p[1]}" for p in back_points])
     svg_els.append(f'<path d="{path_back}" stroke="#999" stroke-width="1" fill="none" stroke-dasharray="4,4" />')
     
-    # 2. Connectors (Back to Front)
     for p1, p2 in zip(scaled_points, back_points):
         svg_els.append(f'<line x1="{p1[0]}" y1="{p1[1]}" x2="{p2[0]}" y2="{p2[1]}" stroke="#555" stroke-width="1" />')
     
-    # ADDED LOGIC: LENGTH LABEL - MOVED TO BACK (Perspective)
     if len(scaled_points) > 0:
-        # User wants it "au bout de l'image, pour donner de la profondeur"
-        # We can place it at 80% along the connector from Front to Back
-        # Let's use the first segment connector
         p_front = scaled_points[0]
         p_back = back_points[0]
-        
-        # 80% towards back
         t = 0.8
         lbl_x = p_front[0] + (p_back[0] - p_front[0]) * t
-        lbl_y = p_front[1] + (p_back[1] - p_front[1]) * t
-        
-        # Slightly above
-        lbl_y -= 15
-        
-        # Display Length
+        lbl_y = p_front[1] + (p_back[1] - p_front[1]) * t - 15
         svg_els.append(f'<text x="{lbl_x}" y="{lbl_y}" font-family="Arial" font-size="14" fill="#335c85" font-weight="bold" text-anchor="middle">L={length}</text>')
         
-    # 3. Front Face (Profile) - Thick
     path_front = "M " + " L ".join([f"{p[0]},{p[1]}" for p in scaled_points])
     svg_els.append(f'<path d="{path_front}" {style_line} stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />')
-    
-    # Labels (Dimensions) - Left Normal Logic
+
+    # Dimensions Labels
+    # Calculate Centroid for Outward Orientation
+    if scaled_points:
+        cx = sum([p[0] for p in scaled_points]) / len(scaled_points)
+        cy = sum([p[1] for p in scaled_points]) / len(scaled_points)
+    else:
+        cx, cy = 0, 0
+
     for i in range(len(scaled_points)-1):
-        p1 = scaled_points[i]
-        p2 = scaled_points[i+1]
+        p1 = scaled_points[i]; p2 = scaled_points[i+1]
+        mx = (p1[0]+p2[0])/2; my = (p1[1]+p2[1])/2
+        dx = p2[0]-p1[0]; dy = p2[1]-p1[1]
+        l = math.sqrt(dx*dx+dy*dy)
+        if l==0: l=1
         
-        # Midpoint
-        mx = (p1[0] + p2[0])/2
-        my = (p1[1] + p2[1])/2
+        # Initial Normal (Rotated -90 deg)
+        nx = dy/l; ny = -dx/l
         
-        # Direction Vector
-        dx = p2[0] - p1[0]
-        dy = p2[1] - p1[1]
+        # Check Orientation against Centroid (Outward Check)
+        vec_out_x = mx - cx
+        vec_out_y = my - cy
+        dot = nx * vec_out_x + ny * vec_out_y
         
-        # Normalize Dir
-        len_seg = math.sqrt(dx*dx + dy*dy)
-        if len_seg == 0: len_seg = 1
-        dx, dy = dx/len_seg, dy/len_seg
+        # If pointing Inward (Dot < 0), Flip
+        if dot < 0:
+            nx = -nx; ny = -ny
+            
+        # Offset "Close" (User request)
+        offset = 10
         
-        # Left Normal Vector (dy, -dx)
-        nx = dy
-        ny = -dx
+        lx = mx + nx*offset; ly = my + ny*offset
         
-        # Offset
-        offset = 12
-        lx = mx + nx * offset
-        ly = my + ny * offset
-        
-        # Text Anchoring
-        anchor = "middle"
-        baseline = "middle"
-        
-        # Analyze Normal Direction
-        # Pure Left
-        if nx < -0.7: 
-            anchor = "end"      
-            baseline = "middle"
-        # Pure Right
-        elif nx > 0.7:
-            anchor = "start"
-            baseline = "middle"
-        # Pure Up
-        elif ny < -0.7:
-            anchor = "middle"
-            baseline = "baseline"
-            ly += 5
-        # Pure Down
-        elif ny > 0.7:
-            anchor = "middle"
-            baseline = "hanging"
-            ly -= 5
-        else:
-            # Diagonal
-            if nx < 0: anchor = "end"
-            else: anchor = "start"
-            if ny < 0: baseline = "baseline"
-            else: baseline = "hanging"
-
-        # Special Override for M1 (Flat)
-        if type_p == "m1":
-             # Force Up
-             lx = mx
-             ly = my - 15  # Above
-             anchor = "middle"
-             baseline = "baseline"
-
-        # M5 (Z) - Segment C (i=2)
-        # Up Segment on Right Side -> Force Right Label
-        if type_p == "m5" and i == 2:
-             lx = mx + 15
-             ly = my
-             anchor = "start"
-             baseline = "middle"
-             
-        # M9 (Bavette) - Segment C (i=2) -> Down Vertical. Left Normal is Right. Correct.
-        # M10 (Z Rejet) - Segment C (i=2) -> Slope Down. 
-        # Check collision with perspective?
+        # Smart Anchoring based on Direction
+        anchor="middle"; baseline="middle"
+        if abs(nx) > abs(ny): # Horizontal-ish force
+            if nx > 0: anchor="start"; lx += 3 # Right
+            else: anchor="end"; lx -= 3 # Left
+        else: # Vertical-ish force
+            if ny > 0: baseline="hanging"; ly += 3 # Down
+            else: baseline="baseline"; ly -= 3 # Up
         
         try:
-             param_key = PROFILES_DB[type_p]["params"][i]
-             svg_els.append(f'<text x="{lx}" y="{ly}" font-family="Arial" font-size="14" fill="red" font-weight="bold" text-anchor="{anchor}" dominant-baseline="{baseline}">{param_key}</text>')
+             # Handle labels for m11 (Sur Mesure)
+             if type_p == "m11":
+                 seg_char = chr(65 + i) # A, B, C...
+                 txt = seg_char 
+             else:
+                 txt = PROFILES_DB[type_p]["params"][i]
+                 
+             svg_els.append(f'<text x="{lx}" y="{ly}" font-family="Arial" font-size="14" fill="red" font-weight="bold" text-anchor="{anchor}" dominant-baseline="{baseline}">{txt}</text>')
         except: pass
 
-    # ADDED LOGIC: FACE 1 / FACE 2 LABELS
-    # Find longest segment to anchor face labels
-    max_len = -1
-    best_idx = 0
-    
+    # Face Labels
+    max_len = -1; best_idx = 0
     if len(scaled_points) > 1:
         for i in range(len(scaled_points)-1):
-            p1 = scaled_points[i]
-            p2 = scaled_points[i+1]
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            l = math.sqrt(dx*dx + dy*dy)
-            if l > max_len:
-                max_len = l
-                best_idx = i
-                
-        # Calculate Normal for longest segment
-        p1 = scaled_points[best_idx]
-        p2 = scaled_points[best_idx+1]
-        mx = (p1[0] + p2[0])/2
-        my = (p1[1] + p2[1])/2
-        dx = p2[0] - p1[0]
-        dy = p2[1] - p1[1]
-        norm_len = math.sqrt(dx*dx+dy*dy)
-        if norm_len==0: norm_len=1
+            p1=scaled_points[i]; p2=scaled_points[i+1]
+            l = math.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+            if l > max_len: max_len=l; best_idx=i
         
-        # Left Normal (Outside / Face 1)
-        nx = dy / norm_len
-        ny = -dx / norm_len
+        p1=scaled_points[best_idx]; p2=scaled_points[best_idx+1]
+        mx=(p1[0]+p2[0])/2; my=(p1[1]+p2[1])/2
+        dx=p2[0]-p1[0]; dy=p2[1]-p1[1]
+        l=math.sqrt(dx*dx+dy*dy)
+        if l==0: l=1
+        nx=dy/l; ny=-dx/l
         
-        # Positions
-        # Face 1: Outside (Left) - Increased distance for readability
-        f1_dist = 70 
-        f1_x = mx + nx * f1_dist
-        f1_y = my + ny * f1_dist
-        
-        # Face 2: Inside (Right)
-        f2_dist = 40
-        f2_x = mx - nx * f2_dist
-        f2_y = my - ny * f2_dist
-        
-        # Styling
-        face_style = 'font-family="Arial" font-size="12" fill="#666" font-style="italic" text-anchor="middle" dominant-baseline="middle"'
-        
-        svg_els.append(f'<text x="{f1_x}" y="{f1_y}" {face_style}>FACE 1</text>')
-        svg_els.append(f'<text x="{f2_x}" y="{f2_y}" {face_style}>FACE 2</text>')
+        f1_dist=70; f1_x=mx+nx*f1_dist; f1_y=my+ny*f1_dist
+        f2_dist=40; f2_x=mx-nx*f2_dist; f2_y=my-ny*f2_dist
+        style='font-family="Arial" font-size="12" fill="#666" font-style="italic" text-anchor="middle" dominant-baseline="middle"'
+        svg_els.append(f'<text x="{f1_x}" y="{f1_y}" {style}>FACE 2</text>')
+        svg_els.append(f'<text x="{f2_x}" y="{f2_y}" {style}>FACE 1</text>')
 
     final_svg = f'<svg width="{w_svg}" height="{h_svg}" xmlns="http://www.w3.org/2000/svg" style="background-color: white;">'
     final_svg += "".join(svg_els)
     final_svg += '</svg>'
-    
     return final_svg
 
-def render_habillage_main_ui(inputs, selected_key):
-    """Renders the Main Content Area for Habillage."""
-    
-    # 1. Header
-    profile_name = PROFILES_DB[selected_key]["name"]
-    st.markdown(f"### 🧱 {profile_name}")
-    
-    # 2. Main Columns
-    c1, c2 = st.columns([1, 2])
-    
-    # Layout:
-    # C1: Schema Image + Key Info (Dev, Qty, Dims)
-    # C2: 3D Visualization
-    # Bottom: Full Recap Table + Export
-    
-    # Calculate Data
-    L_mm = inputs.get("length", 3000) # Changed from "longueur" to "length" based on sidebar output
-    dev_prod = calc_developpe(selected_key, inputs)
-    qty = inputs.get("qte", 1) # Changed from "qte" to "qty" for consistency with sidebar output
-    
-    # Format Dim String
-    dim_parts = []
-    params = PROFILES_DB[selected_key]["params"]
-    for p in params:
-        val = inputs.get(p, PROFILES_DB[selected_key]["defaults"].get(p))
-        dim_parts.append(f"{p}={val}")
-    dim_str = ", ".join(dim_parts)
+def get_html_download_link(content_html, filename, label):
+    import base64
+    b64 = base64.b64encode(content_html.encode()).decode()
+    return f'<a href="data:text/html;base64,{b64}" download="{filename}" target="_blank" style="text-decoration:none; color:black; background-color:#f0f2f6; padding:8px 16px; border-radius:4px; border:1px solid #ccc;">📄 {label}</a>'
 
+def render_habillage_main_ui(cfg):
+    import datetime # Added for timestamp in HTML report
+    prof = cfg['prof']
+    st.header(f"🧱 {prof['name']}") 
+    
+    dev = calc_developpe(cfg['key'], cfg['inputs'])
+    
+    c1, c2 = st.columns([2, 3])
+    
+    # Data Preparation
+    # Filter out metadata from dimensions display
+    exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
+    dim_str = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    surface = (dev * cfg['length'] * cfg['qte']) / 1000000
+    L_mm = cfg['length']
+    qty = cfg['qte']
+    
     with c1:
         st.subheader("Schéma de Principe")
-        img_key = PROFILES_DB[selected_key]["image_key"]
-        
-        # Display Image or Placeholder
-        # Check if we have the file
-        image_path = os.path.join(ARTIFACT_DIR, img_key)
+        image_path = os.path.join(ARTIFACT_DIR, prof['image_key'])
         if os.path.exists(image_path):
-             st.image(image_path, use_container_width=True)
+            st.image(image_path, use_container_width=True)
         else:
-             # Try absolute path from brain if needed (dev mode hack)
-             # But usually running in scratch/v73_fix
-             # Let's assume relative path works or try to find it
-             # Fallback
-             st.info(f"Image {img_key} non trouvée")
+            st.warning(f"Image non trouvée: {prof['image_key']}")
 
         st.markdown("---")
-        st.markdown("#### Informations Clés")
+        st.subheader("Informations Clés")
         
-        # Big metric
-        st.metric("Développé Unitaire", f"{int(dev_prod)} mm")
-        
+        st.metric("Développé Unitaire", f"{int(dev)} mm")
         st.markdown(f"**Quantité :** {qty}")
         st.markdown(f"**Dimensions :** {dim_str}")
         st.markdown(f"**Longueur :** {L_mm} mm")
-        st.markdown(f"**Matière :** {inputs.get('finition', 'Prélaqué 1 face')}") # Changed from "matiere" to "finition"
-        st.markdown(f"**Couleur (Face 1) :** {inputs.get('couleur', 'Blanc 9016')}") # Explicit Face 1
-             
+        st.markdown(f"**Matière :** {cfg['finition']}")
+        st.markdown(f"**Couleur :** {cfg['couleur']}")
+
     with c2:
         st.subheader("Visualisation 3D")
-        color_sel = inputs.get("couleur", "Blanc 9016") # Changed from "color" to "couleur"
-        svg_code = generate_profile_svg(selected_key, inputs, L_mm, color_sel)
-        st.components.v1.html(svg_code, height=600, scrolling=True)
-        st.caption("Vue filaire 3D indicative. Face 1 = Face Laquée.")
+        svg = generate_profile_svg(cfg['key'], cfg['inputs'], cfg['length'], cfg['couleur'])
+        st.markdown(f'''
+        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; background-color: white; text-align: center;">
+            {svg}
+        </div>
+        ''', unsafe_allow_html=True)
+        st.caption("Vue filaire 3D indicative.")
+        
+        # SVG Download (Under visual)
+        st.download_button("🖼️ Télécharger SVG", svg, f"profil_{cfg['ref']}.svg", "image/svg+xml")
 
-    # 3. Bottom Section: Full Recap & Actions
+    # Bottom Section: Full Recap & Exports
     st.markdown("---")
     st.subheader("Récapitulatif (Habillage)")
     
     col_table, col_export = st.columns([3, 1])
     
+    df_hab = pd.DataFrame({
+        "Libellé": ["Référence", "Modèle", "Quantité", "Dimensions", "Longueur", "Développé", "Surface Totale", "Matière", "Épaisseur", "Couleur"],
+        "Valeur": [
+            cfg['ref'], prof['name'], cfg['qte'], dim_str, f"{cfg['length']} mm", f"{dev} mm", 
+            f"{surface:.2f} m²", cfg['finition'], cfg['epaisseur'], cfg['couleur']
+        ]
+    })
+
     with col_table:
-        data = {
-            "Libellé": ["Référence", "Modèle", "Quantité", "Dimensions", "Longueur", "Développé", "Surface Totale", "Matière", "Épaisseur", "Couleur (Face 1)"],
-            "Valeur": [
-                inputs.get("ref", "Bavette F1"), # Changed from "ref" to "ref"
-                profile_name,
-                str(qty),
-                dim_str,
-                f"{L_mm} mm",
-                f"{int(dev_prod)} mm",
-                f"{((dev_prod * L_mm * qty) / 1000000):.2f} m²",
-                inputs.get("finition", "Prélaqué 1 face"), # Changed from "matiere" to "finition"
-                inputs.get('epaisseur', "75/100"), # Changed from "epaisseur" to "epaisseur"
-                inputs.get("couleur", "Blanc 9016") # Changed from "color" to "couleur"
-            ]
-        }
-        df = pd.DataFrame(data)
-        st.table(df)
+        st.table(df_hab)
         
     with col_export:
         st.write("")
         st.write("")
         
-        # Prepare data for download button
+        # 1. JSON
         hab_data = {
-            "ref": inputs.get("ref", "Bavette F1"),
-            "modele": profile_name,
-            "qte": qty,
-            "dims": {p: inputs.get(p, PROFILES_DB[selected_key]["defaults"].get(p)) for p in PROFILES_DB[selected_key]["params"]},
-            "longueur": L_mm,
-            "developpe": dev_prod,
-            "finition": inputs.get("finition", "Prélaqué 1 face"),
-            "epaisseur": inputs.get('epaisseur', "75/100"),
-            "couleur": inputs.get("couleur", "Blanc 9016")
+            "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
+            "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
+            "finition": cfg['finition'], "epaisseur": cfg['epaisseur'], "couleur": cfg['couleur']
         }
         json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
-        st.download_button("💾 Télécharger Fiche Habillage", json_hab, f"habillage_{inputs.get('ref', 'Bavette F1')}.json", "application/json", use_container_width=True)
+        st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
+
+        # 2. HTML/PDF (Rich)
+        import base64
+        # Encode image
+        img_b64 = ""
+        if os.path.exists(image_path):
+             with open(image_path, "rb") as f:
+                 img_b64 = base64.b64encode(f.read()).decode()
+        
+        html_report = f"""
+        <html>
+        <head>
+            <title>Fiche Habillage {cfg['ref']}</title>
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #333; }}
+                h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+                h2 {{ color: #34495e; margin-top: 20px; }}
+                .container {{ display: flex; flex-direction: row; gap: 40px; margin-top: 30px; }}
+                .left-col {{ flex: 1; }}
+                .right-col {{ flex: 1.5; text-align: center; }}
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #e9ecef; }}
+                .info-item {{ margin-bottom: 10px; font-size: 1.1em; }}
+                .info-label {{ font-weight: bold; color: #555; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 30px; }}
+                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+                th {{ background-color: #f2f2f2; color: #2c3e50; }}
+                .svg-container {{ border: 1px solid #ccc; padding: 20px; border-radius: 8px; background: white; }}
+                .print-btn {{ display: none; }}
+                @media print {{ .print-btn {{ display: none; }} }}
+            </style>
+        </head>
+        <body>
+            <button class="print-btn" onclick="window.print()" style="padding:10px 20px; font-size:16px; margin-bottom:20px;">🖨️ Imprimer</button>
+            
+            <h1>Fiche Technique : {prof['name']}</h1>
+            <p style="font-size: 1.2em;">Référence Chantier : <strong>{cfg['ref']}</strong></p>
+            
+            <div class="container">
+                <div class="left-col">
+                    <h2>Schéma de Principe</h2>
+                    <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; border: 1px solid #eee; border-radius: 4px;">
+                    
+                    <div class="info-box" style="margin-top: 20px;">
+                        <h2>Informations Clés</h2>
+                        <div class="info-item"><span class="info-label">Développé :</span> {int(dev)} mm</div>
+                        <div class="info-item"><span class="info-label">Quantité :</span> {qty}</div>
+                        <div class="info-item"><span class="info-label">Longueur :</span> {L_mm} mm</div>
+                        <div class="info-item"><span class="info-label">Dimensions :</span> {dim_str}</div>
+                        <div class="info-item"><span class="info-label">Matière :</span> {cfg['finition']}</div>
+                        <div class="info-item"><span class="info-label">Couleur :</span> {cfg['couleur']}</div>
+                    </div>
+                </div>
+                
+                <div class="right-col">
+                    <h2>Visualisation 3D</h2>
+                    <div class="svg-container">
+                        {svg}
+                    </div>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">Vue filaire 3D indicative (non contractuelle)</p>
+                </div>
+            </div>
+            
+            <h2>Récapitulatif Détaillé</h2>
+            <table>
+                <tr><th>Libellé</th><th>Valeur</th></tr>
+                {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
+            </table>
+            
+            <div style="margin-top: 50px; font-size: 0.8em; color: #999; text-align: center;">
+                Généré automatiquement par le Calculateur Menuiserie & Habillage le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}
+            </div>
+            
+            <script>
+                // Auto-print on load option
+                // window.onload = function() {{ window.print(); }}
+            </script>
+        </body>
+        </html>
+        """
+        st.download_button("📄 Imprimer (PDF)", html_report, f"fiche_{cfg['ref']}.html", "text/html", use_container_width=True)
 
 def render_habillage_sidebar_ui():
     """Renders the Sidebar inputs for Habillage and returns the config dict."""
@@ -1966,6 +1915,7 @@ def render_habillage_sidebar_ui():
 
     return {
         "key": selected_key,
+        "prof": PROFILES_DB[selected_key],
         "inputs": config, # Flattened config into inputs for compatibility
         # Add discrete keys if needed by main ui
         "ref": ref_chantier,
@@ -2457,6 +2407,6 @@ if nav_mode == "Menuiserie":
 
 else:
     if hab_config:
-        render_habillage_main_ui(hab_config['inputs'], hab_config['key'])
+        render_habillage_main_ui(hab_config)
 
 # END OF CODE V73.5 (VALIDATED)
