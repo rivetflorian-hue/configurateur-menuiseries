@@ -1816,7 +1816,7 @@ def render_habillage_sidebar_ui():
     # 0. Identification
     with st.sidebar.expander("1. Identification", expanded=False):
         c_ref, c_qte = st.columns([2, 1])
-        ref_chantier = c_ref.text_input("Référence", "Bavette F1", key="hab_ref")
+        ref_chantier = c_ref.text_input("Référence", value=st.session_state.get('ref_id', "Bavette F1"), key="hab_ref")
         qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="hab_qte")
         config["ref"] = ref_chantier
         config["qte"] = qte_piece
@@ -1825,112 +1825,157 @@ def render_habillage_sidebar_ui():
     profile_keys = list(PROFILES_DB.keys())
     model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
     
-    with st.sidebar.expander("2. Modèle & Dimensions", expanded=False):
-        selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x])
-        prof = PROFILES_DB[selected_key]
-
-        # Dimensions
-        inputs = {}
-        cols_input = st.columns(2)
-        for i, p in enumerate(prof["params"]):
-            is_angle = p.startswith("A") and len(p) > 1 and p[1].isdigit() 
-            step = 5 if is_angle else 5
+    with st.sidebar.expander("2. Modèle & Dimensions", expanded=True):
+        selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=2)
+        
+        if selected_key == "m11":
+            # CUSTOM BUILDER
+            st.info("Mode Sur Mesure")
+            
+            # Init state
+            if 'custom_segments' not in st.session_state:
+                st.session_state['custom_segments'] = [{'type': 'start', 'val_L': 100}]
+            
+            segs = st.session_state['custom_segments']
+            
+            # Segment 1 (Start)
+            st.markdown(f"**Segment A (Départ)**")
+            segs[0]['val_L'] = st.number_input(f"Longueur A (mm)", 0, 1000, segs[0]['val_L'], key="cust_start_L")
+            
+            # Subsequent Segments
+            letter_idx = 1 # B
+            
+            for i, seg in enumerate(segs[1:], 1):
+                char_L = chr(65 + letter_idx)      # B, C...
+                char_H = chr(65 + letter_idx + 1)  # C, D...
+                
+                st.markdown(f"**Pli {i}**")
+                
+                # Angle Type
+                atype = st.selectbox(f"Angle Pli {i}", ["90", "45", "135", "Custom"], key=f"atype_{i}", index=["90","45","135","Custom"].index(seg.get('angle_type', '90')))
+                seg['angle_type'] = atype
+                
+                if atype == "Custom":
+                    c1, c2 = st.columns(2)
+                    seg['val_L'] = c1.number_input(f"L. {char_L} (mm)", 0, 1000, seg.get('val_L', 50), key=f"valL_{i}")
+                    seg['val_H'] = c2.number_input(f"H. {char_H} (mm)", 0, 1000, seg.get('val_H', 20), key=f"valH_{i}")
+                    letter_idx += 2 
+                else:
+                    seg['val_L'] = st.number_input(f"Long. {char_L} (mm)", 0, 1000, seg.get('val_L', 50), key=f"valL_{i}")
+                    letter_idx += 1
+                
+                st.markdown("---")
+            
+            # Buttons
+            c_add, c_del = st.columns(2)
+            if c_add.button("➕ Pli", key="btn_add_fold"):
+                segs.append({'type': 'fold', 'angle_type': '90', 'val_L': 50})
+                st.rerun()
+            
+            if len(segs) > 1 and c_del.button("➖ Pli", key="btn_del_fold"):
+                segs.pop()
+                st.rerun()
+                
+            # Maps for return
+            config["A"] = segs[0]['val_L']
+            # We don't map all dynamic keys to flat config dict easily, 
+            # but main render reads session_state for m11 anyway.
+            
+        else:
+            # STANDARD
+            prof = PROFILES_DB[selected_key]
+            params = prof["params"]
             defaults = prof["defaults"]
             
-            with cols_input[i % 2]:
-                label = f"Angle {p}" if is_angle else f"Cote {p}"
-                val = st.number_input(label, value=int(defaults.get(p, 0)), step=int(step), key=f"hab_{selected_key}_{p}")
-                inputs[p] = val
-        
-        length = st.number_input("Longueur (mm)", value=3000, step=100)
+            cols_input = st.columns(2)
+            for i, p in enumerate(params):
+                is_angle = p.startswith("A") and len(p) > 1 and p[1].isdigit() 
+                step = 5 if is_angle else 5
+                
+                with cols_input[i % 2]:
+                    label = f"Angle {p}" if is_angle else f"Cote {p}"
+                    val = st.number_input(label, value=int(defaults.get(p, 0)), step=int(step), key=f"hab_{selected_key}_{p}")
+                    config[p] = val
+                    
+        length = st.number_input("Longueur (mm)", value=3000, step=100, key="hab_len")
+        config["length"] = length # Ensure key matches usage
 
-    # 2. Finish
+    # 3. Finition
     with st.sidebar.expander("3. Finition", expanded=False):
-        type_finition = st.selectbox("Type", ["Prélaqué 1 face", "Prélaqué 2 faces", "Brut", "Galva"], index=0)
+        # Type Finition choices
+        type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
+        type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
         
         epaisseurs = ["75/100", "10/10", "15/10", "20/10", "30/10"]
-        epaisseur = st.selectbox("Épaisseur", epaisseurs, index=0)
+        epaisseur = st.selectbox("Épaisseur", epaisseurs, index=0, key="hab_ep")
         
         colors_list = ["Blanc 9016", "Gris 7016", "Noir 9005", "Chêne Doré", "RAL Spécifique"]
+        
+        couleur = "Standard"
+        
+        # Logic for Color Sections
         if "Brut" in type_finition or "Galva" in type_finition:
-             couleur = f"Sans ({type_finition})"
              st.info(f"Aspect : {type_finition}")
-        else:
-             couleur_st = st.selectbox("Couleur", colors_list, index=0)
+             couleur = f"Sans ({type_finition})"
+             
+        elif "Laquage 1 face" == type_finition:
+             # Choice of face
+             face_choice = st.selectbox("Face à laquer", ["Face 1 (Extérieur)", "Face 2 (Intérieur)"], index=0)
+             # Color selection
+             couleur_st = st.selectbox("Couleur", colors_list, index=0, key="col_laq1")
+             if couleur_st == "RAL Spécifique":
+                 ral = st.text_input("Code RAL", "RAL ")
+                 couleur = f"{ral} ({face_choice})"
+             else:
+                 couleur = f"{couleur_st} ({face_choice})"
+                 
+        elif "Laquage 2 faces" == type_finition:
+             st.markdown("**Face 1 (Ext)**")
+             c1_st = st.selectbox("Couleur F1", colors_list, index=0, key="col_laq2_f1")
+             c1_val = c1_st
+             if c1_st == "RAL Spécifique": c1_val = st.text_input("RAL F1", "RAL ")
+             
+             st.markdown("**Face 2 (Int)**")
+             c2_st = st.selectbox("Couleur F2", colors_list, index=0, key="col_laq2_f2")
+             c2_val = c2_st
+             if c2_st == "RAL Spécifique": c2_val = st.text_input("RAL F2", "RAL ")
+
+             couleur = f"F1: {c1_val} / F2: {c2_val}"
+             
+        elif "Prélaqué 1 face" == type_finition:
+             # Face 1 defaults
+             couleur_st = st.selectbox("Couleur (Face 1)", colors_list, index=0, key="col_prelaq1")
+             config["couleur"] = couleur_st # Backwards compat
              if couleur_st == "RAL Spécifique":
                  couleur = st.text_input("Code RAL", "RAL ")
              else:
                  couleur = couleur_st
+                 
+        elif "Prélaqué 2 faces" == type_finition:
+             # Usually standard colors both sides or diff?
+             # Let's assume user picks one color for both or distinct?
+             # Industry standard: often same color or specific pairs.
+             # Let's offer generic choice.
+             st.markdown("**Face 1 & 2**")
+             couleur_st = st.selectbox("Couleur", colors_list, index=0, key="col_prelaq2")
+             couleur = f"{couleur_st} (2 faces)"
+
+        config["finition"] = type_finition
+        config["epaisseur"] = epaisseur
+        config["couleur"] = couleur
 
     return {
+        "key": selected_key,
+        "inputs": config, # Flattened config into inputs for compatibility
+        # Add discrete keys if needed by main ui
         "ref": ref_chantier,
         "qte": qte_piece,
-        "key": selected_key,
-        "prof": prof,
-        "inputs": inputs,
         "length": length,
-        "finition": type_finition,
-        "epaisseur": epaisseur,
+        "finition": type_finition, 
+        "epaisseur": epaisseur, 
         "couleur": couleur
     }
 
-def render_habillage_main_ui(cfg):
-    """Renders the Main Content (Visuals, Recap) for Habillage using the config dict."""
-    prof = cfg['prof']
-    st.header(f"🧱 {prof['name']}") # Dynamic Header
-    
-    # Calculate Data Needed for both columns
-    dev = calc_developpe(cfg['key'], cfg['inputs'])
-    
-    c1, c2 = st.columns([1, 1])
-    
-    with c1:
-        st.subheader("Schéma de Principe")
-        image_path = os.path.join(ARTIFACT_DIR, prof['image_key'])
-        if os.path.exists(image_path):
-            # Centered Image
-            st.image(image_path, use_container_width=True)
-        else:
-            st.warning(f"Image introuvable: {prof['image_key']}")
-            
-        # --- RECAPITULATIF (BON DE COMMANDE) ---
-        # Moving Recap here to fill space as requested
-        st.markdown("---")
-        st.markdown("<h3 class='centered-header'>Récapitulatif (Habillage)</h3>", unsafe_allow_html=True)
-        
-        dim_str = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items()])
-        surface = (dev * cfg['length'] * cfg['qte']) / 1000000
-        
-        df_hab = pd.DataFrame({
-            "Libellé": ["Référence", "Modèle", "Quantité", "Dimensions", "Longueur", "Développé", "Surface Totale", "Matière", "Épaisseur", "Couleur"],
-            "Valeur": [
-                cfg['ref'], prof['name'], cfg['qte'], dim_str, f"{cfg['length']} mm", f"{dev} mm", 
-                f"{surface:.2f} m²", cfg['finition'], cfg['epaisseur'], cfg['couleur']
-            ]
-        })
-        
-        st.dataframe(df_hab, use_container_width=True, hide_index=True)
-        
-        # Export
-        hab_data = {
-            "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
-            "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
-            "finition": cfg['finition'], "epaisseur": cfg['epaisseur'], "couleur": cfg['couleur']
-        }
-        json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
-        st.download_button("💾 Télécharger Fiche Habillage", json_hab, f"habillage_{cfg['ref']}.json", "application/json")
-            
-    with c2:
-        st.subheader("Visualisation 3D")
-        svg = generate_profile_svg(cfg['key'], cfg['inputs'], cfg['length'], cfg['couleur'])
-        st.markdown(f'''
-        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; background-color: white; text-align: center;">
-            {svg}
-        </div>
-        ''', unsafe_allow_html=True)
-        st.caption("Vue filaire 3D indicative.")
-
-        st.metric("Développé Unitaire", f"{dev} mm", delta_color="off")
 
 
 # --- 2. INTERFACE SIDEBAR ---
@@ -2412,6 +2457,6 @@ if nav_mode == "Menuiserie":
 
 else:
     if hab_config:
-        render_habillage_main_ui(hab_config)
+        render_habillage_main_ui(hab_config['inputs'], hab_config['key'])
 
 # END OF CODE V73.5 (VALIDATED)
