@@ -38,12 +38,26 @@ st.markdown("""
     
     /* Move Sidebar Button down on Mobile to avoid header overlap */
     @media (max-width: 768px) {
+        /* OPEN BUTTON (When sidebar is closed) */
         [data-testid="collapsedControl"] {
-            top: 4rem !important;
-            z-index: 100000 !important;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 50%;
+            top: 80px !important;
+            left: 10px !important;
+            z-index: 1000000 !important;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ccc;
+            border-radius: 5px;
             padding: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        /* CLOSE BUTTON (When sidebar is open) - Target the SVG/Button container inside sidebar */
+        section[data-testid="stSidebar"] button {
+             top: 80px !important; /* Force it down */
+        }
+        
+        /* Alternatively, push the entire Sidebar Header down */
+        section[data-testid="stSidebar"] > div > div:first-child {
+             margin-top: 60px !important;
         }
     }
 </style>
