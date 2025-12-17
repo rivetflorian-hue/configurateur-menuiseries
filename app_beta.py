@@ -6,7 +6,37 @@ import copy
 import pandas as pd
 import os
 
-st.set_page_config(layout="wide", page_title="Calculateur Menuiserie & Habillage", initial_sidebar_state="collapsed")
+st.set_page_config(
+    layout="wide", 
+    page_title="Calculateur Menuiserie & Habillage", 
+    initial_sidebar_state="collapsed"
+)
+
+# --- CSS MOBILE & PRINT FIX ---
+st.markdown("""
+<style>
+    /* Force sidebar behavior on mobile */
+    @media (max-width: 768px) {
+        [data-testid="stSidebar"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            z-index: 99999 !important;
+        }
+        /* Fix overlapping content if needed */
+        .main .block-container {
+            max-width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
+    /* General print fix */
+    @media print {
+        [data-testid="stSidebar"] { display: none; }
+        .stApp { margin: 0; padding: 0; }
+        header { display: none; }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ==============================================================================
 # --- MODULE GESTION DE PROJET (Intégré) ---
@@ -1588,7 +1618,7 @@ def generate_profile_svg(type_p, inputs, length, color_name):
         svg_els.append(f'<text x="{f1_x}" y="{f1_y}" {style}>FACE 2</text>')
         svg_els.append(f'<text x="{f2_x}" y="{f2_y}" {style}>FACE 1</text>')
 
-    final_svg = f'<svg width="{w_svg}" height="{h_svg}" xmlns="http://www.w3.org/2000/svg" style="background-color: white;">'
+    final_svg = f'<svg viewBox="0 0 {w_svg} {h_svg}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="background-color: white; width: 100%; height: auto;">'
     final_svg += "".join(svg_els)
     final_svg += '</svg>'
     return final_svg
@@ -1599,7 +1629,7 @@ def get_html_download_link(content_html, filename, label):
     return f'<a href="data:text/html;base64,{b64}" download="{filename}" target="_blank" style="text-decoration:none; color:black; background-color:#f0f2f6; padding:8px 16px; border-radius:4px; border:1px solid #ccc;">📄 {label}</a>'
 
 def render_habillage_main_ui(cfg):
-    import datetime # Added for timestamp in HTML report
+    import datetime
     prof = cfg['prof']
     st.header(f"🧱 {prof['name']}") 
     
@@ -1608,7 +1638,6 @@ def render_habillage_main_ui(cfg):
     c1, c2 = st.columns([2, 3])
     
     # Data Preparation
-    # Filter out metadata from dimensions display
     exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
     # Use HTML break for better readability in export
     dim_items = [f"<b>{k}</b> = {v}" for k,v in cfg['inputs'].items() if k not in exclude_keys]
@@ -1647,10 +1676,8 @@ def render_habillage_main_ui(cfg):
         ''', unsafe_allow_html=True)
         st.caption("Vue filaire 3D indicative.")
         
-        # SVG Download (Under visual)
         st.download_button("🖼️ Télécharger SVG", svg, f"profil_{cfg['ref']}.svg", "image/svg+xml")
 
-    # Bottom Section: Full Recap & Exports
     st.markdown("---")
     st.subheader("Récapitulatif (Habillage)")
     
@@ -1671,7 +1698,6 @@ def render_habillage_main_ui(cfg):
         st.write("")
         st.write("")
         
-        # 1. JSON
         hab_data = {
             "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
             "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
@@ -1680,9 +1706,7 @@ def render_habillage_main_ui(cfg):
         json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
         st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
 
-        # 2. HTML/PDF (Rich)
         import base64
-        # Encode image
         img_b64 = ""
         if os.path.exists(image_path):
              with open(image_path, "rb") as f:
@@ -1698,59 +1722,30 @@ def render_habillage_main_ui(cfg):
             <style>
                 body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
                 .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                
-                /* HEADER */
                 .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
                 .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
                 .header .ref {{ font-size: 14px; color: #7f8c8d; }}
-                
-                /* LAYOUT */
                 .main-grid {{ display: grid; grid-template-columns: 40% 55%; gap: 5%; margin-bottom: 40px; }}
-                
-                /* SECTION UTILS */
                 h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
-                
-                /* LEFT COLUMN */
                 .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
                 .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 15px; }}
                 .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
                 .info-row:last-child {{ border: 0; }}
                 .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 100px; }}
-                .dims-val {{ font-size: 16px; color: #2c3e50; }}
-                
-                /* RIGHT COLUMN */
+                .dims-val {{ font-size: 16px; color: #2c3e50; text-align: left; }}
+                .dims-row {{ justify-content: flex-start; gap: 20px; }}
                 .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
-                .visual-box svg {{ width: 100% !important; height: auto !important; max-height: 500px; display: block; margin: auto; }}
-                
-                /* TABLE */
+                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
                 table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
                 th {{ background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 500; }}
                 td {{ border-bottom: 1px solid #ddd; padding: 10px; }}
                 tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                
-                /* FOOTER */
                 .footer {{ margin-top: 60px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
-                
-                /* PRINT SPECIFICS */
-                @media print {{
-                    body {{ padding: 0; background: white; }}
-                    .page-container {{ box-shadow: none; padding: 0; max-width: none; }}
-                    .print-btn {{ display: none !important; }}
-                    @page {{ margin: 15mm; size: A4 portrait; }}
-                }}
-                
-                .print-btn {{
-                    background: #2c3e50; color: white; border: none; padding: 12px 24px; 
-                    font-size: 16px; border-radius: 4px; cursor: pointer; display: block; margin: 0 auto 30px auto;
-                    font-family: 'Roboto', sans-serif; font-weight: bold;
-                }}
-                .print-btn:hover {{ background: #34495e; }}
+                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
             </style>
         </head>
         <body>
             <div class="page-container">
-                <button class="print-btn" onclick="window.print()">🖨️ Imprimer la Fiche Technique</button>
-                
                 <div class="header">
                     <div>
                         <h1>Fiche Technique</h1>
@@ -1764,13 +1759,11 @@ def render_habillage_main_ui(cfg):
                 </div>
                 
                 <div class="main-grid">
-                    <!-- LEFT COLUMN -->
                     <div>
                         <h2>Schéma de Principe</h2>
                         <div class="schema-box">
                              <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; max-height: 200px;">
                         </div>
-                        
                         <h2>Caractéristiques</h2>
                         <div class="info-box">
                             <div class="info-row"><span class="label">Quantité</span> <span>{qty}</span></div>
@@ -1779,14 +1772,12 @@ def render_habillage_main_ui(cfg):
                             <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
                             <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
                             <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
-                            <div class="info-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                            <div class="info-row dims-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
                                 <span class="label">Dimensions</span> 
                                 <span class="dims-val">{dim_str_export}</span>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- RIGHT COLUMN -->
                     <div>
                         <h2>Visualisation 3D</h2>
                         <div class="visual-box">
@@ -1798,26 +1789,15 @@ def render_habillage_main_ui(cfg):
                 
                 <h2>Détails de Commande</h2>
                 <table>
-                    <thead>
-                        <tr>
-                            <th style="width: 40%;">Libellé</th>
-                            <th>Valeur</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th style="width: 40%;">Libellé</th><th>Valeur</th></tr></thead>
                     <tbody>
                         {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
                     </tbody>
                 </table>
-                
-                <div class="footer">
-                     Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>
-                     Merci de vérifier les cotes avant validation définitive.
-                </div>
+                <div class="footer">Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>Merci de vérifier les cotes avant validation définitive.</div>
             </div>
-            
             <script>
-                // Optional: Auto-print
-                // window.onload = () => window.print();
+                // Auto-print removed, purely manual now as per request to remove 'frame'.
             </script>
         </body>
         </html>
@@ -2375,6 +2355,10 @@ if nav_mode == "Menuiserie":
     st.markdown("---")
     st.markdown("<h3 class='centered-header'>Récapitulatif - Bon de Commande</h3>", unsafe_allow_html=True)
 
+    # PREPARE ZONES DATA (Before Columns)
+    config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
+    sorted_zones = sorted(config_display, key=lambda z: z['id'])
+
     c_recap_left, c_recap_right = st.columns([1, 1])
 
     with c_recap_left:
@@ -2424,14 +2408,118 @@ if nav_mode == "Menuiserie":
         st.dataframe(df_infos, use_container_width=True)
         
         # BOUTON EXPORT JSON
-        export_data = serialize_config()
-        export_json = json.dumps(export_data, indent=2, ensure_ascii=False)
+        # BOUTON EXPORT PDF (HTML PRO)
+        import base64
+        import datetime
+        
+        # Prepare Data for Report
+        # Encode SVG for embedding
+        svg_b64 = base64.b64encode(svg_output.encode("utf-8")).decode("utf-8")
+        
+        # Zone details formatted for HTML
+        zones_html_rows = ""
+        for z in sorted_zones:
+            d_list = []
+            remp = z['params'].get('remplissage_global', 'Vitrage')
+            d_list.append(f"Remplissage: {remp}")
+            if remp == "Vitrage":
+                d_list.append(f"Vitrage: Ext {z['params'].get('vitrage_ext','4')} / Int {z['params'].get('vitrage_int','4')}")
+            if z['params'].get('grille_aera'): d_list.append(f"Grille: {z['params'].get('pos_grille')}")
+            if 'sens' in z['params']: d_list.append(f"Sens: {z['params']['sens']}")
+            
+            details_str = ", ".join(d_list)
+            zones_html_rows += f"<tr><td><strong>{z['label']}</strong> ({z['type']})</td><td>{details_str}</td></tr>"
+
+        menuiserie_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Fiche Technique - {s.get('ref_id', 'Menuiserie')}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+            <style>
+                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
+                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
+                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
+                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
+                .main-grid {{ display: grid; grid-template-columns: 35% 60%; gap: 5%; margin-bottom: 40px; }}
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; }}
+                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
+                .info-row:last-child {{ border: 0; }}
+                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 120px; }}
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
+                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
+                table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
+                th {{ background: #2c3e50; color: white; padding: 10px; text-align: left; }}
+                td {{ border-bottom: 1px solid #ddd; padding: 8px; }}
+                .footer {{ margin-top: 50px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
+                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
+            </style>
+        </head>
+        <body>
+            <div class="page-container">
+                <div class="header">
+                    <div>
+                        <h1>Fiche Technique</h1>
+                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">Menuiserie {s.get('mat_type', 'PVC')}</div>
+                    </div>
+                    <div class="ref" style="text-align: right;">
+                        <div>RÉFÉRENCE CHANTIER</div>
+                        <strong style="font-size: 18px; color: #000;">{s.get('ref_id', 'F1')}</strong>
+                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                    </div>
+                </div>
+
+                <div class="main-grid">
+                    <!-- LEFT COLUMN: SPECS -->
+                    <div>
+                        <h2>Caractéristiques</h2>
+                        <div class="info-box">
+                            <div class="info-row"><span class="label">Quantité</span> <span>{s.get('qte_val', 1)}</span></div>
+                            <div class="info-row"><span class="label">Dimensions</span> <span>{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm</span></div>
+                            <div class="info-row"><span class="label">Dormant</span> <span>{s.get('frame_thig', 70)} mm</span></div>
+                            <div class="info-row"><span class="label">Pose</span> <span>{s.get('pose_type', '-')}</span></div>
+                            <div class="info-row"><span class="label">Partie Basse</span> <span>{pb_txt}</span></div>
+                            <div class="info-row"><span class="label">Couleur Int</span> <span>{s.get('col_in', '-')}</span></div>
+                            <div class="info-row"><span class="label">Couleur Ext</span> <span>{s.get('col_ex', '-')}</span></div>
+                            <div class="info-row"><span class="label">Volet Roulant</span> <span>{vr_txt}</span></div>
+                            <div class="info-row"><span class="label">Ailettes</span> <span>{ailes_txt}</span></div>
+                        </div>
+                    </div>
+                    
+                    <!-- RIGHT COLUMN: VISUAL -->
+                    <div>
+                        <h2>Plan Technique</h2>
+                        <div class="visual-box">
+                            {svg_output}
+                        </div>
+                    </div>
+                </div>
+                
+                <h2>Détail des Zones</h2>
+                <table>
+                    <thead><tr><th style="width: 35%;">Zone</th><th>Détails Technique</th></tr></thead>
+                    <tbody>
+                        {zones_html_rows}
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                    Document généré par le Calculateur Menuiserie.<br>
+                    Les côtes sont "Dos de Dormant". Merci de vérifier avant validation.
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
         st.download_button(
-            label="💾 Télécharger Fiche (PDF/Print)",
-            data=export_json, # Placeholder for PDF
-            file_name=f"{st.session_state.get('ref_id', 'Configuration')}_config.json",
-            mime="application/json",
-            help="Pour le moment export JSON, bientôt PDF."
+            label="📄 Enregistrer PDF (Fiche Technique)",
+            data=menuiserie_html,
+            file_name=f"Fiche_{s.get('ref_id', 'F1')}.html",
+            mime="text/html"
         )
 
     with c_recap_right:
