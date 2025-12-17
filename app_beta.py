@@ -2363,7 +2363,12 @@ def generate_svg_v73():
 # ==============================================================================
 
 # Base directory for artifacts
-ARTIFACT_DIR = "/Users/rivet/.gemini/antigravity/brain/cb97bc5a-e933-4edf-a526-bbdd7caa31a4"
+# Correction pour déploiement : Utilisation d'un chemin relatif
+# On récupère le dossier où se trouve le script actuel
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# On pointe vers le dossier "assets" situé au même niveau
+ARTIFACT_DIR = os.path.join(current_dir, "assets")
 
 # Define Profile Models based on User Images (1-5)
 
