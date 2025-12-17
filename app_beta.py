@@ -6,7 +6,7 @@ import copy
 import pandas as pd
 import os
 
-st.set_page_config(layout="wide", page_title="Calculateur Menuiserie & Habillage")
+st.set_page_config(layout="wide", page_title="Calculateur Menuiserie & Habillage", initial_sidebar_state="collapsed")
 
 # ==============================================================================
 # --- MODULE GESTION DE PROJET (Intégré) ---
@@ -1685,71 +1685,132 @@ def render_habillage_main_ui(cfg):
                  img_b64 = base64.b64encode(f.read()).decode()
         
         html_report = f"""
+        <!DOCTYPE html>
         <html>
         <head>
-            <title>Fiche Habillage {cfg['ref']}</title>
+            <meta charset="utf-8">
+            <title>Fiche Technique - {prof['name']}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
             <style>
-                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; color: #333; }}
-                h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
-                h2 {{ color: #34495e; margin-top: 20px; }}
-                .container {{ display: flex; flex-direction: row; gap: 40px; margin-top: 30px; }}
-                .left-col {{ flex: 1; }}
-                .right-col {{ flex: 1.5; text-align: center; }}
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #e9ecef; }}
-                .info-item {{ margin-bottom: 10px; font-size: 1.1em; }}
-                .info-label {{ font-weight: bold; color: #555; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 30px; }}
-                th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-                th {{ background-color: #f2f2f2; color: #2c3e50; }}
-                .svg-container {{ border: 1px solid #ccc; padding: 20px; border-radius: 8px; background: white; }}
-                .print-btn {{ display: none; }}
-                @media print {{ .print-btn {{ display: none; }} }}
+                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
+                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                
+                /* HEADER */
+                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
+                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
+                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
+                
+                /* LAYOUT */
+                .main-grid {{ display: grid; grid-template-columns: 1fr 1.5fr; gap: 40px; margin-bottom: 40px; }}
+                
+                /* SECTION UTILS */
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; }}
+                
+                /* LEFT COLUMN */
+                .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; }}
+                .info-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
+                .info-row:last-child {{ border: 0; }}
+                .label {{ font-weight: bold; color: #555; }}
+                
+                /* RIGHT COLUMN */
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center; }}
+                
+                /* TABLE */
+                table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
+                th {{ background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 500; }}
+                td {{ border-bottom: 1px solid #ddd; padding: 10px; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9; }}
+                
+                /* FOOTER */
+                .footer {{ margin-top: 60px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
+                
+                /* PRINT SPECIFICS */
+                @media print {{
+                    body {{ padding: 0; background: white; }}
+                    .page-container {{ box-shadow: none; padding: 0; max-width: none; }}
+                    .print-btn {{ display: none !important; }}
+                    @page {{ margin: 15mm; size: A4 portrait; }}
+                }}
+                
+                .print-btn {{
+                    background: #2c3e50; color: white; border: none; padding: 12px 24px; 
+                    font-size: 16px; border-radius: 4px; cursor: pointer; display: block; margin: 0 auto 30px auto;
+                    font-family: 'Roboto', sans-serif; font-weight: bold;
+                }}
+                .print-btn:hover {{ background: #34495e; }}
             </style>
         </head>
         <body>
-            <button class="print-btn" onclick="window.print()" style="padding:10px 20px; font-size:16px; margin-bottom:20px;">🖨️ Imprimer</button>
-            
-            <h1>Fiche Technique : {prof['name']}</h1>
-            <p style="font-size: 1.2em;">Référence Chantier : <strong>{cfg['ref']}</strong></p>
-            
-            <div class="container">
-                <div class="left-col">
-                    <h2>Schéma de Principe</h2>
-                    <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; border: 1px solid #eee; border-radius: 4px;">
-                    
-                    <div class="info-box" style="margin-top: 20px;">
-                        <h2>Informations Clés</h2>
-                        <div class="info-item"><span class="info-label">Développé :</span> {int(dev)} mm</div>
-                        <div class="info-item"><span class="info-label">Quantité :</span> {qty}</div>
-                        <div class="info-item"><span class="info-label">Longueur :</span> {L_mm} mm</div>
-                        <div class="info-item"><span class="info-label">Dimensions :</span> {dim_str}</div>
-                        <div class="info-item"><span class="info-label">Matière :</span> {cfg['finition']}</div>
-                        <div class="info-item"><span class="info-label">Couleur :</span> {cfg['couleur']}</div>
+            <div class="page-container">
+                <button class="print-btn" onclick="window.print()">🖨️ Imprimer la Fiche Technique</button>
+                
+                <div class="header">
+                    <div>
+                        <h1>Fiche Technique</h1>
+                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">{prof['name']}</div>
+                    </div>
+                    <div class="ref" style="text-align: right;">
+                        <div>RÉFÉRENCE CHANTIER</div>
+                        <strong style="font-size: 18px; color: #000;">{cfg['ref']}</strong>
+                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
                     </div>
                 </div>
                 
-                <div class="right-col">
-                    <h2>Visualisation 3D</h2>
-                    <div class="svg-container">
-                        {svg}
+                <div class="main-grid">
+                    <!-- LEFT COLUMN -->
+                    <div>
+                        <h2>Schéma de Principe</h2>
+                        <div class="schema-box">
+                             <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; max-height: 200px;">
+                        </div>
+                        
+                        <h2>Caractéristiques</h2>
+                        <div class="info-box">
+                            <div class="info-row"><span class="label">Quantité</span> <span>{qty}</span></div>
+                            <div class="info-row"><span class="label">Longueur</span> <span>{L_mm} mm</span></div>
+                            <div class="info-row"><span class="label">Développé</span> <span>{int(dev)} mm</span></div>
+                            <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
+                            <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
+                            <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
+                            <div style="margin-top: 10px; font-style: italic; color: #666; font-size: 12px;">
+                                <strong>Dimensions :</strong> {dim_str}
+                            </div>
+                        </div>
                     </div>
-                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">Vue filaire 3D indicative (non contractuelle)</p>
+                    
+                    <!-- RIGHT COLUMN -->
+                    <div>
+                        <h2>Visualisation 3D</h2>
+                        <div class="visual-box">
+                            {svg}
+                            <div style="margin-top: 15px; font-size: 12px; color: #999;">Vue filaire indicative</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <h2>Détails de Commande</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 40%;">Libellé</th>
+                            <th>Valeur</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                     Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>
+                     Merci de vérifier les cotes avant validation définitive.
                 </div>
             </div>
             
-            <h2>Récapitulatif Détaillé</h2>
-            <table>
-                <tr><th>Libellé</th><th>Valeur</th></tr>
-                {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
-            </table>
-            
-            <div style="margin-top: 50px; font-size: 0.8em; color: #999; text-align: center;">
-                Généré automatiquement par le Calculateur Menuiserie & Habillage le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}
-            </div>
-            
             <script>
-                // Auto-print on load option
-                // window.onload = function() {{ window.print(); }}
+                // Optional: Auto-print
+                // window.onload = () => window.print();
             </script>
         </body>
         </html>
