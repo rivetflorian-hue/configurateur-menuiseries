@@ -77,24 +77,12 @@ st.markdown("""
 
 # --- CONFIGURATION CHEMINS (GLOBAL) ---
 # Correction pour déploiement Cloud : Chemin relatif "assets"
+# --- CONFIGURATION CHEMINS (GLOBAL) ---
+# Correction pour déploiement Cloud : Chemin relatif "assets"
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ARTIFACT_DIR = os.path.join(current_dir, "assets")
 
-# --- DEBUG BANNER (TEMPORARY) ---
-st.error(f"⚠️ DEBUG MODE ACTIF (V.BETA) ⚠️")
-st.info(f"📂 Current Dir: {current_dir}")
-st.info(f"📂 Artifact Dir: {ARTIFACT_DIR}")
-
-try:
-    if os.path.exists(ARTIFACT_DIR):
-        files = os.listdir(ARTIFACT_DIR)
-        st.success(f"✅ Assets trouvés ({len(files)} fichiers) : {files}")
-    else:
-        st.error(f"❌ Dossier 'assets' INTROUVABLE au chemin : {ARTIFACT_DIR}")
-        st.write(f"Contenu de {current_dir} : {os.listdir(current_dir)}")
-except Exception as e:
-    st.error(f"Erreur lecture dossier : {e}")
-# --------------------------------
+# ==============================================================================
 
 
 # ==============================================================================
