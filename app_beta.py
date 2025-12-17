@@ -17,11 +17,23 @@ st.markdown("""
 <style>
     /* Force sidebar behavior on mobile */
     @media (max-width: 768px) {
-        [data-testid="stSidebar"] {
-            width: 100% !important;
-            max-width: 100% !important;
+        /* Only force full width when OPEN */
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            min-width: 100vw !important;
+            width: 100vw !important;
+            height: 100vh !important;
             z-index: 99999 !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
         }
+        
+        /* Force hide when CLOSED (if standard behavior fails) */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            margin-left: -110vw !important;
+            width: 0 !important;
+        }
+
         /* Fix overlapping content if needed */
         .main .block-container {
             max-width: 100% !important;
