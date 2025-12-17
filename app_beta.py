@@ -1610,7 +1610,11 @@ def render_habillage_main_ui(cfg):
     # Data Preparation
     # Filter out metadata from dimensions display
     exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
-    dim_str = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    # Use HTML break for better readability in export
+    dim_items = [f"<b>{k}</b> = {v}" for k,v in cfg['inputs'].items() if k not in exclude_keys]
+    dim_str_export = "<br>".join(dim_items)
+    dim_str_display = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    
     surface = (dev * cfg['length'] * cfg['qte']) / 1000000
     L_mm = cfg['length']
     qty = cfg['qte']
@@ -1628,7 +1632,7 @@ def render_habillage_main_ui(cfg):
         
         st.metric("Développé Unitaire", f"{int(dev)} mm")
         st.markdown(f"**Quantité :** {qty}")
-        st.markdown(f"**Dimensions :** {dim_str}")
+        st.markdown(f"**Dimensions :** {dim_str_display}")
         st.markdown(f"**Longueur :** {L_mm} mm")
         st.markdown(f"**Matière :** {cfg['finition']}")
         st.markdown(f"**Couleur :** {cfg['couleur']}")
@@ -1655,7 +1659,7 @@ def render_habillage_main_ui(cfg):
     df_hab = pd.DataFrame({
         "Libellé": ["Référence", "Modèle", "Quantité", "Dimensions", "Longueur", "Développé", "Surface Totale", "Matière", "Épaisseur", "Couleur"],
         "Valeur": [
-            cfg['ref'], prof['name'], cfg['qte'], dim_str, f"{cfg['length']} mm", f"{dev} mm", 
+            cfg['ref'], prof['name'], cfg['qte'], dim_str_display, f"{cfg['length']} mm", f"{dev} mm", 
             f"{surface:.2f} m²", cfg['finition'], cfg['epaisseur'], cfg['couleur']
         ]
     })
@@ -1701,20 +1705,22 @@ def render_habillage_main_ui(cfg):
                 .header .ref {{ font-size: 14px; color: #7f8c8d; }}
                 
                 /* LAYOUT */
-                .main-grid {{ display: grid; grid-template-columns: 1fr 1.5fr; gap: 40px; margin-bottom: 40px; }}
+                .main-grid {{ display: grid; grid-template-columns: 40% 55%; gap: 5%; margin-bottom: 40px; }}
                 
                 /* SECTION UTILS */
-                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; }}
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
                 
                 /* LEFT COLUMN */
                 .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; }}
-                .info-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 15px; }}
+                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
                 .info-row:last-child {{ border: 0; }}
-                .label {{ font-weight: bold; color: #555; }}
+                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 100px; }}
+                .dims-val {{ font-size: 16px; color: #2c3e50; }}
                 
                 /* RIGHT COLUMN */
-                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center; }}
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
+                .visual-box svg {{ width: 100% !important; height: auto !important; max-height: 500px; display: block; margin: auto; }}
                 
                 /* TABLE */
                 table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
@@ -1773,8 +1779,9 @@ def render_habillage_main_ui(cfg):
                             <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
                             <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
                             <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
-                            <div style="margin-top: 10px; font-style: italic; color: #666; font-size: 12px;">
-                                <strong>Dimensions :</strong> {dim_str}
+                            <div class="info-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                                <span class="label">Dimensions</span> 
+                                <span class="dims-val">{dim_str_export}</span>
                             </div>
                         </div>
                     </div>
