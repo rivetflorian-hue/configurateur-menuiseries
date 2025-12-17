@@ -35,6 +35,17 @@ st.markdown("""
         .stApp { margin: 0; padding: 0; }
         header { display: none; }
     }
+    
+    /* Move Sidebar Button down on Mobile to avoid header overlap */
+    @media (max-width: 768px) {
+        [data-testid="collapsedControl"] {
+            top: 4rem !important;
+            z-index: 100000 !important;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            padding: 5px;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2443,19 +2454,27 @@ if nav_mode == "Menuiserie":
                 .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
                 .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
                 .header .ref {{ font-size: 14px; color: #7f8c8d; }}
-                .main-grid {{ display: grid; grid-template-columns: 35% 60%; gap: 5%; margin-bottom: 40px; }}
-                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; }}
-                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
+                
+                /* STACKED LAYOUT */
+                .container {{ margin-bottom: 40px; }}
+                
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; margin-top: 30px; }}
+                
+                /* VISUAL (TOP, BIG) */
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 500px; margin-bottom: 40px; }}
+                .visual-box svg {{ width: 100%; height: auto; max-height: 800px; display: block; margin: auto; }}
+                
+                /* INFO (BOTTOM, FULL WIDTH) */
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; column-count: 2; column-gap: 40px; }}
+                .info-row {{ display: flex; justify-content: flex-start; align-items: baseline; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; break-inside: avoid; }}
                 .info-row:last-child {{ border: 0; }}
-                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 120px; }}
-                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
-                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
+                .label {{ font-weight: bold; color: #555; white-space: nowrap; width: 150px; min-width: 150px; display: inline-block; }}
+                
                 table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
                 th {{ background: #2c3e50; color: white; padding: 10px; text-align: left; }}
                 td {{ border-bottom: 1px solid #ddd; padding: 8px; }}
                 .footer {{ margin-top: 50px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
-                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
+                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} .info-box {{ column-count: 2; }} }}
             </style>
         </head>
         <body>
@@ -2472,29 +2491,25 @@ if nav_mode == "Menuiserie":
                     </div>
                 </div>
 
-                <div class="main-grid">
-                    <!-- LEFT COLUMN: SPECS -->
-                    <div>
-                        <h2>Caractéristiques</h2>
-                        <div class="info-box">
-                            <div class="info-row"><span class="label">Quantité</span> <span>{s.get('qte_val', 1)}</span></div>
-                            <div class="info-row"><span class="label">Dimensions</span> <span>{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm</span></div>
-                            <div class="info-row"><span class="label">Dormant</span> <span>{s.get('frame_thig', 70)} mm</span></div>
-                            <div class="info-row"><span class="label">Pose</span> <span>{s.get('pose_type', '-')}</span></div>
-                            <div class="info-row"><span class="label">Partie Basse</span> <span>{pb_txt}</span></div>
-                            <div class="info-row"><span class="label">Couleur Int</span> <span>{s.get('col_in', '-')}</span></div>
-                            <div class="info-row"><span class="label">Couleur Ext</span> <span>{s.get('col_ex', '-')}</span></div>
-                            <div class="info-row"><span class="label">Volet Roulant</span> <span>{vr_txt}</span></div>
-                            <div class="info-row"><span class="label">Ailettes</span> <span>{ailes_txt}</span></div>
-                        </div>
+                <div class="container">
+                    <!-- 1. PLAN TECHNIQUE (LARGE) -->
+                    <h2>Plan Technique</h2>
+                    <div class="visual-box">
+                        {svg_output}
                     </div>
                     
-                    <!-- RIGHT COLUMN: VISUAL -->
-                    <div>
-                        <h2>Plan Technique</h2>
-                        <div class="visual-box">
-                            {svg_output}
-                        </div>
+                    <!-- 2. CARACTERISTIQUES (BELOW) -->
+                    <h2>Caractéristiques Générales</h2>
+                    <div class="info-box">
+                        <div class="info-row"><span class="label">Quantité</span> <span>{s.get('qte_val', 1)}</span></div>
+                        <div class="info-row"><span class="label">Dimensions</span> <span>{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm</span></div>
+                        <div class="info-row"><span class="label">Dormant</span> <span>{s.get('frame_thig', 70)} mm</span></div>
+                        <div class="info-row"><span class="label">Pose</span> <span>{s.get('pose_type', '-')}</span></div>
+                        <div class="info-row"><span class="label">Partie Basse</span> <span>{pb_txt}</span></div>
+                        <div class="info-row"><span class="label">Couleur Int</span> <span>{s.get('col_in', '-')}</span></div>
+                        <div class="info-row"><span class="label">Couleur Ext</span> <span>{s.get('col_ex', '-')}</span></div>
+                        <div class="info-row"><span class="label">Volet Roulant</span> <span>{vr_txt}</span></div>
+                        <div class="info-row"><span class="label">Ailettes</span> <span>{ailes_txt}</span></div>
                     </div>
                 </div>
                 
