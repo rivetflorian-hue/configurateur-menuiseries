@@ -75,6 +75,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- CONFIGURATION CHEMINS (GLOBAL) ---
+# Correction pour déploiement Cloud : Chemin relatif "assets"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.join(current_dir, "assets")
+
+
 # ==============================================================================
 # --- MODULE GESTION DE PROJET (Intégré) ---
 # ==============================================================================
@@ -1692,6 +1698,7 @@ def render_habillage_main_ui(cfg):
             st.image(image_path, use_container_width=True)
         else:
             st.warning(f"Image non trouvée: {prof['image_key']}")
+            st.caption(f"Chemin cherché: {image_path}") # Debug helper
 
         st.markdown("---")
         st.subheader("Informations Clés")
@@ -2363,12 +2370,10 @@ def generate_svg_v73():
 # ==============================================================================
 
 # Base directory for artifacts
-# Correction pour déploiement : Utilisation d'un chemin relatif
-# On récupère le dossier où se trouve le script actuel
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Base directory for artifacts
+# (Déplacé en haut de fichier pour portée globale)
 
-# On pointe vers le dossier "assets" situé au même niveau
-ARTIFACT_DIR = os.path.join(current_dir, "assets")
+# Define Profile Models based on User Images (1-5)
 
 # Define Profile Models based on User Images (1-5)
 
