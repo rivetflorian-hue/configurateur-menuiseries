@@ -2059,8 +2059,9 @@ def render_habillage_form():
         type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
         type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
         
-        epaisseurs = ["75/100", "10/10", "15/10", "20/10", "30/10"]
-        epaisseur = st.selectbox("Épaisseur", epaisseurs, index=0, key="hab_ep")
+        epaisseurs = ["10/10ème (1,0 mm)", "15/10ème (1,5 mm)", "20/10ème (2,0 mm)", "30/10ème (3,0 mm)"]
+        # Default: 15/10ème (Index 1). Key renamed to avoid conflict with old '75/100' value.
+        epaisseur = st.selectbox("Épaisseur", epaisseurs, index=1, key="hab_ep_v2")
         
         colors_list = ["Blanc 9016", "Gris 7016", "Noir 9005", "Chêne Doré", "RAL Spécifique"]
         
