@@ -3,6 +3,87 @@ import math
 import uuid
 import json
 import copy
+import pandas as pd
+import os
+
+st.set_page_config(
+    layout="wide", 
+    page_title="Calculateur Menuiserie & Habillage", 
+    initial_sidebar_state="collapsed"
+)
+
+# --- CSS MOBILE & PRINT FIX ---
+st.markdown("""
+<style>
+    /* Force sidebar behavior on mobile */
+    @media (max-width: 768px) {
+        /* Only force full width when OPEN */
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            min-width: 100vw !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 99999 !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+        }
+        
+        /* Force hide when CLOSED (if standard behavior fails) */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            margin-left: -110vw !important;
+            width: 0 !important;
+        }
+
+        /* Fix overlapping content if needed */
+        .main .block-container {
+            max-width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
+    /* General print fix */
+    @media print {
+        [data-testid="stSidebar"] { display: none; }
+        .stApp { margin: 0; padding: 0; }
+        header { display: none; }
+    }
+    
+    /* Move Sidebar Button down on Mobile to avoid header overlap */
+    @media (max-width: 768px) {
+        /* OPEN BUTTON (When sidebar is closed) */
+        [data-testid="collapsedControl"] {
+            top: 80px !important;
+            left: 10px !important;
+            z-index: 1000000 !important;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        /* CLOSE BUTTON (When sidebar is open) - Target the SVG/Button container inside sidebar */
+        section[data-testid="stSidebar"] button {
+             top: 80px !important; /* Force it down */
+        }
+        
+        /* Alternatively, push the entire Sidebar Header down */
+        section[data-testid="stSidebar"] > div > div:first-child {
+             margin-top: 60px !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- CONFIGURATION CHEMINS (GLOBAL) ---
+# Correction pour déploiement Cloud : Chemin relatif "assets"
+# --- CONFIGURATION CHEMINS (GLOBAL) ---
+# Correction pour déploiement Cloud : Chemin relatif "assets"
+current_dir = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.join(current_dir, "assets")
+
+# ==============================================================================
+
 
 # ==============================================================================
 # --- MODULE GESTION DE PROJET (Intégré) ---
@@ -410,6 +491,7 @@ def flatten_tree(node, current_x, current_y, current_w, current_h):
             node['zone_params']['params'] = {}
             
         z = {
+            'id': node['id'],
             'type': node['zone_params']['type'],
             'params': node['zone_params']['params'],
             'x': current_x,
@@ -1063,6 +1145,885 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
             svg.append((z_base+8, f'<line x1="{lx}" y1="{gy}" x2="{lx}" y2="{gy+12}" stroke="black" stroke-width="0.5" />'))
 
 
+
+# --- MODULE HABILLAGE (HELPERS & DEFINITIONS) ---
+
+# Define Profile Models based on User Images (1-5)
+PROFILES_DB = {
+    # 1. Plat (Ex m9)
+    "m1": {
+        "name": "Modèle 1 (Plat / Chant)",
+        "image_key": "uploaded_image_3_1765906701825.jpg",
+        "params": ["A"], 
+        "defaults": {"A": 100},
+        "segments": ["A"]
+    },
+    # 2. Cornière Simple (Ex m8)
+    "m2": {
+        "name": "Modèle 2 (Cornière Simple)",
+        "image_key": "uploaded_image_2_1765906701825.jpg",
+        "params": ["A", "B"], 
+        "defaults": {"A": 50, "B": 50}
+    },
+    # 3. Cornière Complexe (Ex m1)
+    "m3": {
+        "name": "Modèle 3 (Cornière Complexe)",
+        "image_key": "uploaded_image_0_1765905922661.jpg", 
+        "params": ["A", "B", "A1"],
+        "defaults": {"A": 50, "B": 50, "A1": 90}
+    },
+    # 4. Profil en U (Ex m10)
+    "m4": {
+        "name": "Modèle 4 (Profil en U)",
+        "image_key": "uploaded_image_4_1765906701825.jpg",
+        "params": ["A", "B", "C"], 
+        "defaults": {"A": 40, "B": 150, "C": 40}
+    },
+    # 5. Profil en Z (Ex m7)
+    "m5": {
+        "name": "Modèle 5 (Profil en Z)",
+        "image_key": "uploaded_image_1_1765906701825.jpg",
+        "params": ["A", "B", "C"], 
+        "defaults": {"A": 40, "B": 60, "C": 40}
+    },
+    # 6. Profil en Z Complexe (Ex m6) - SAME KEY, Updated logic kept
+    "m6": {
+        "name": "Modèle 6 (Profil en Z Complexe)",
+        "image_key": "uploaded_image_0_1765906701825.jpg",
+        "params": ["A", "B", "C", "D", "A1", "A2", "A3"],
+        "defaults": {"A": 20, "B": 100, "C": 30, "D": 20, "A1": 100, "A2": 100, "A3": 90}
+    },
+    # 7. Cornière 3 Plis (Ex m3)
+    "m7": {
+        "name": "Modèle 7 (Cornière 3 Plis)",
+        "image_key": "uploaded_image_2_1765905922661.jpg",
+        "params": ["A", "B", "C", "A1"],
+        "defaults": {"A": 20, "B": 20, "C": 50, "A1": 90}
+    },
+    # 8. Couverine (Ex m2)
+    "m8": {
+        "name": "Modèle 8 (Couverine 3 Plis)",
+        "image_key": "uploaded_image_1_1765905922661.jpg",
+        "params": ["A", "B", "C", "A1", "A2"],
+        "defaults": {"A": 40, "B": 100, "C": 40, "A1": 135, "A2": 135}
+    },
+    # 9. Bavette (Ex m5)
+    "m9": {
+        "name": "Modèle 9 (Bavette)",
+        "image_key": "uploaded_image_4_1765905922661.jpg",
+        "params": ["A", "B", "C", "A1", "A2"],
+        "defaults": {"A": 15, "B": 100, "C": 20, "A1": 95, "A2": 90}
+    },
+    # 10. Z Rejet (Ex m4)
+    "m10": {
+        "name": "Modèle 10 (Z / Rejet)",
+        "image_key": "uploaded_image_3_1765905922661.jpg",
+        "params": ["A", "B", "C", "D", "E", "A1"],
+        "defaults": {"A": 20, "B": 50, "C": 20, "D": 50, "E": 20, "A1": 90} 
+    },
+    "m11": {
+        "name": "Sur Mesure",
+        "image_key": "custom_icon.png", # Placeholder
+        "params": [], # Dynamic
+        "defaults": {},
+        "is_custom": True
+    }
+}
+
+def calc_developpe(type_p, inputs):
+    """Calculates developed length (raw material width)."""
+    if type_p == "m11":
+        segs = st.session_state.get('custom_segments', [])
+        total = 0
+        if not segs: return 100 # Default
+        
+        # Seg 0 is always Flat -> Length
+        total += segs[0].get('val_L', 0)
+        
+        for s in segs[1:]:
+             atype = s.get('angle_type', '90')
+             if atype in ['90', '45', '135', '180']:
+                 total += s.get('val_L', 0)
+             else:
+                 # Custom: L and H
+                 l = s.get('val_L', 0)
+                 h = s.get('val_H', 0)
+                 total += math.sqrt(l*l + h*h)
+        return total
+
+    # Existing logic for fixed profiles (fallback)
+    # Quick sum of all single-letter params
+    keys = [k for k in inputs if len(k)==1 and k.isupper()]
+    total = sum([inputs.get(k, 0) for k in keys])
+    return total
+
+def generate_profile_svg(type_p, inputs, length, color_name):
+    w_svg, h_svg = 700, 500
+    
+    colors = {
+        "Blanc 9016": "#FFFFFF",
+        "Gris 7016": "#383E42",
+        "Noir 9005": "#000000",
+        "Chêne Doré": "#C6930A",
+        "Autre": "#999999"
+    }
+    fill_col = colors.get(color_name, "#CCCCCC")
+    
+    points = [(0,0)] # Start at origin
+
+    # CUSTOM MODEL LOGIC (M11)
+    if type_p == "m11":
+        segs = st.session_state.get('custom_segments', [])
+        if not segs:
+            # Default Start if no segments defined
+            points.append((100, 0))
+        else:
+            # Turtle Graphics
+            # Start Direction: Right (0 deg from +X axis)
+            curr_angle_deg = 0 
+            curr_x, curr_y = 0, 0
+            
+            # Seg 1: Flat (always horizontal right)
+            l0 = segs[0].get('val_L', 100)
+            curr_x += l0
+            points.append((curr_x, curr_y))
+            
+            # Follow up segments
+            for s in segs[1:]:
+                atype = s.get('angle_type', '90')
+                l = s.get('val_L', 50)
+                
+                if atype == '90':
+                    # Turn 90 deg (relative to current direction). Default to Up.
+                    # If current is Right (0), turn Up (-90).
+                    # If current is Up (-90), turn Left (-180).
+                    turn = -90 
+                    curr_angle_deg += turn
+                    rad = math.radians(curr_angle_deg)
+                    curr_x += math.cos(rad) * l
+                    curr_y += math.sin(rad) * l
+                    
+                elif atype == '45':
+                    turn = -45
+                    curr_angle_deg += turn
+                    rad = math.radians(curr_angle_deg)
+                    curr_x += math.cos(rad) * l
+                    curr_y += math.sin(rad) * l
+
+                elif atype == '135':
+                    turn = -135
+                    curr_angle_deg += turn
+                    rad = math.radians(curr_angle_deg)
+                    curr_x += math.cos(rad) * l
+                    curr_y += math.sin(rad) * l
+                
+                elif atype == 'Custom':
+                    h = s.get('val_H', 20)
+                    
+                    # Calculate the vector for (L, H) in the current segment's local coordinate system
+                    # L is along the current direction, H is perpendicular (upwards, so -H in SVG Y)
+                    
+                    # Rotate (L, -H) by current_angle_deg
+                    rad_curr = math.radians(curr_angle_deg)
+                    
+                    # New X = L * cos(angle) - (-H) * sin(angle)
+                    # New Y = L * sin(angle) + (-H) * cos(angle)
+                    dx = l * math.cos(rad_curr) - (-h) * math.sin(rad_curr)
+                    dy = l * math.sin(rad_curr) + (-h) * math.cos(rad_curr)
+                    
+                    curr_x += dx
+                    curr_y += dy
+                    
+                    # Update the current angle to the direction of the new segment
+                    new_rad = math.atan2(dy, dx)
+                    curr_angle_deg = math.degrees(new_rad)
+                
+                points.append((curr_x, curr_y))
+                
+    else:
+        # STANDARD MODELS LOGIC (M1..M10)
+        # Re-initialize points to ensure correct start for shapes like U or L
+        points = [] 
+        
+        # Load params
+        defaults = PROFILES_DB[type_p]["defaults"]
+        P = lambda k: inputs.get(k, defaults.get(k, 0))
+        
+        if type_p == "m1": # Plat (A)
+             A = P("A")
+             points = [(0,0), (A, 0)]
+
+        elif type_p == "m2": # Cornière Simple (A, B) - L Shape
+             # Vertical A (Down), Horizontal B (Right)
+             A = P("A"); B = P("B")
+             points = [(0,0), (0, A), (B, A)]
+
+        elif type_p == "m3": # Cornière Complexe (A, B, A1) - Ridge/Roof
+             A = P("A"); B = P("B"); A1 = P("A1")
+             # Peak at (0,0). A is Left leg, B is Right leg. 
+             # A1 is internal angle.
+             # Angle from vertical = A1/2
+             rad = math.radians(A1/2.0)
+             # Left Point (negative X, positive Y as down)
+             p_left = (-A * math.sin(rad), A * math.cos(rad))
+             # Right Point
+             p_right = (B * math.sin(rad), B * math.cos(rad))
+             points = [p_left, (0,0), p_right]
+
+        elif type_p == "m4": # Profil en U (A, B, C) - Bucket
+             # Flange A (Up), Web B (Right), Flange C (Up)
+             A = P("A"); B = P("B"); C = P("C")
+             # Start Top-Left
+             points = [(0, -A), (0,0), (B, 0), (B, -C)]
+
+        elif type_p == "m5": # Profil en Z (A, B, C) - Step
+             # A(Right), B(Down), C(Right)
+             A = P("A"); B = P("B"); C = P("C")
+             points = [(0,0), (A, 0), (A, B), (A+C, B)]
+             
+        elif type_p == "m6": # Z Complexe / Omega (A,B,C,D, A1,A2,A3)
+             # Use Turtle for complex shapes
+             # Start (0,0). Right.
+             curr_x, curr_y = 0, 0
+             curr_ang = 0 # Right
+             points = [(0,0)]
+             
+             # Segment A (Right)
+             A = P("A")
+             curr_x += A
+             points.append((curr_x, curr_y))
+             
+             # Turn A1 (Relative). A1 internal?
+             # If Z-like: A(Right), B(Slope Down).
+             # Angle A1.
+             # Turn = 180 - A1?
+             # Let's assume standard Turtle:
+             # A -> Turn -> B -> Turn -> C -> Turn -> D
+             B=P("B"); C=P("C"); D=P("D")
+             A1=P("A1"); A2=P("A2"); A3=P("A3")
+             
+             # Helper Turtle
+             def moved(l, ang_deg):
+                 fl_x = points[-1][0] + l * math.cos(math.radians(ang_deg))
+                 fl_y = points[-1][1] + l * math.sin(math.radians(ang_deg))
+                 points.append((fl_x, fl_y))
+                 return ang_deg
+
+             # A done. Current Dir 0.
+             # Turn 1: 
+             # If A1=100. Turn 80 deg. (Down-Right)
+             curr_ang += (180 - A1)
+             curr_ang = moved(B, curr_ang)
+             
+             # Turn 2:
+             curr_ang += (180 - A2)
+             curr_ang = moved(C, curr_ang)
+             
+             # Turn 3: 
+             curr_ang += (180 - A3)
+             curr_ang = moved(D, curr_ang)
+
+        elif type_p == "m7": # Cornière 3 Plis (A, B, C, A1)
+             # A(Hem), B(Leg), C(Leg)?
+             # Or A(Leg), B(Leg), C(Hem)?
+             # Let's assume: A (Small return), Angle A1, B (Leg 1), 90, C (Leg 2).
+             # Standard "3 Pli": Return -> Leg -> Leg.
+             A=P("A"); B=P("B"); C=P("C"); A1=P("A1")
+             points = [(0,0)]
+             # A (Return In/Up?)
+             # Let's do B and C as Main L.
+             # B (Vertical), C (Horizontal).
+             # A is Return on B.
+             # Start A.
+             # Point 0.
+             # Draw A. Turn A1. Draw B. Turn 90. Draw C.
+             # Direction?
+             # Start Up-Right.
+             curr_ang = -90 # Up
+             curr_x, curr_y = 0, 0
+             
+             # A (Return)
+             # Maybe starts horizontal in?
+             # Let's assume A is the small text.
+             # Draw: A -> Turn -> B -> Turn -> C.
+             # A (Right). Turn. B (Down). Turn. C (Right).
+             # If A1=90.
+             points = [(0,0), (A,0)] # A Right
+             # Turn A1 (Internal).
+             curr_ang = 0 + (180-A1)
+             vx = math.cos(math.radians(curr_ang)); vy = math.sin(math.radians(curr_ang))
+             p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
+             points.append(p2)
+             # Turn 90 (Standard Cornière)
+             # Assuming B to C is 90.
+             curr_ang += 90 
+             vx = math.cos(math.radians(curr_ang)); vy = math.sin(math.radians(curr_ang))
+             p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+             points.append(p3)
+
+        elif type_p == "m8": # Couverine (A, B, C, A1, A2)
+             # A(Drop), B(Top), C(Drop).
+             # A (Up), B (Right), C (Down) -> Inverted U shape.
+             A=P("A"); B=P("B"); C=P("C"); A1=P("A1"); A2=P("A2")
+             # Start Bottom-Left.
+             points = [(0, A)] # Start at A down
+             # Draw Up A.
+             points.append((0,0))
+             # Turn A1. Draw B.
+             # Curr Dir Up (-90).
+             # A1 internal. Turn = 180-A1.
+             # If A1=90 -> Right.
+             curr_ang = -90 + (180-A1)
+             vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+             p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
+             points.append(p2)
+             # Turn A2. Draw C.
+             curr_ang += (180-A2)
+             vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+             p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+             points.append(p3)
+
+        elif type_p == "m9": # Bavette (A, B, C, A1, A2)
+            # A(Flat), B(Slope), C(Drop)? 
+            # Or A(Up), B(Slope), C(Vertical)?
+            # Bavette: A horizontal. B Slope Down. C Vertical Down.
+            A=P("A"); B=P("B"); C=P("C"); A1=P("A1"); A2=P("A2")
+            points = [(0,0), (A,0)] # A Right
+            # Turn A1 (Obtuse usually, >90)
+            # 0 -> Turn. 180-A1? (Down)
+            # If A1=135. Turn=45 (Down Right).
+            curr_ang = 0 + (180-A1)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p2 = (points[-1][0]+vx*B, points[-1][1]+vy*B)
+            points.append(p2)
+            # Turn A2. C Vertical?
+            # A2 usually 90 or similar.
+            curr_ang += (180-A2)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p3 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+            points.append(p3)
+
+        elif type_p == "m10": # Z Rejet (A, B, C, D, E, A1)
+            # A, B, C, D, E
+            # A(Flat), B(Up/Down?), C(Rejet), D(Vertical), E(Return)
+            # Standard: A Right. B Vertical Up. C Slope Out. D Vertical Up. E Return.
+            # OR A Right. B Vertical Down. C Slope. D Vert. E Return.
+            # Let's look at schema logic from before.
+            # A, B, C, D...
+            # Arbitrary implementation based on typical "Z Rejet":
+            # A(Fixing), B(Offset), C(Rejet), D(Face), E(Return).
+            inputs_keys = inputs.keys()
+            # Generic chain if possible? No, need angles.
+            # Let's do simple orthogonal chain A-B-C-D-E if angles not explicit?
+            # A1 is angle.
+            points = [(0,0)]
+            # Draw A Right
+            A=P("A"); points.append((A,0))
+            # B Down
+            B=P("B"); points.append((A,B))
+            # C Slope (Rejet). Angle A1.
+            # If A1=135. Down -> Out.
+            C=P("C"); A1=P("A1")
+            curr_ang = 90 + (180-A1)
+            vx=math.cos(math.radians(curr_ang)); vy=math.sin(math.radians(curr_ang))
+            p2 = (points[-1][0]+vx*C, points[-1][1]+vy*C)
+            points.append(p2)
+            # D Down
+            D=P("D")
+            p3 = (points[-1][0], points[-1][1]+D)
+            points.append(p3)
+            # E Left (Return)
+            E=P("E")
+            p4 = (points[-1][0]-E, points[-1][1])
+            points.append(p4)
+            
+        else:
+            # Fallback
+            points = [(0,0), (100,0), (100,100)]
+
+    # Normalize coordinates to fit in View
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    
+    w_shape = max_x - min_x
+    h_shape = max_y - min_y
+    
+    # Scale to fill 30% of SVG but WITH SENSITIVITY
+    target_size = 250
+    
+    # SCALING FIX: Minimum divisor 300
+    ref_dim = max(w_shape, h_shape, 300) 
+    scale = target_size / ref_dim
+        
+    # Project 2D Profile (Front Face)
+    ox, oy = 250, 300 # Centerish
+    
+    scaled_points = []
+    for p in points:
+        nx = ox + (p[0] - min_x) * scale
+        ny = oy + (p[1] - min_y) * scale
+        scaled_points.append((nx, ny))
+        
+    # Create Back Face (Depth)
+    depth_x, depth_y = 150, -80
+    back_points = []
+    for p in scaled_points:
+        back_points.append((p[0] + depth_x, p[1] + depth_y))
+        
+    # DRAW SVG
+    svg_els = []
+    style_line = f'stroke="black" stroke-width="2" fill="none"'
+    path_back = "M " + " L ".join([f"{p[0]},{p[1]}" for p in back_points])
+    svg_els.append(f'<path d="{path_back}" stroke="#999" stroke-width="1" fill="none" stroke-dasharray="4,4" />')
+    
+    for p1, p2 in zip(scaled_points, back_points):
+        svg_els.append(f'<line x1="{p1[0]}" y1="{p1[1]}" x2="{p2[0]}" y2="{p2[1]}" stroke="#555" stroke-width="1" />')
+    
+    if len(scaled_points) > 0:
+        p_front = scaled_points[0]
+        p_back = back_points[0]
+        t = 0.8
+        lbl_x = p_front[0] + (p_back[0] - p_front[0]) * t
+        lbl_y = p_front[1] + (p_back[1] - p_front[1]) * t - 15
+        svg_els.append(f'<text x="{lbl_x}" y="{lbl_y}" font-family="Arial" font-size="14" fill="#335c85" font-weight="bold" text-anchor="middle">L={length}</text>')
+        
+    path_front = "M " + " L ".join([f"{p[0]},{p[1]}" for p in scaled_points])
+    svg_els.append(f'<path d="{path_front}" {style_line} stroke="#000" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />')
+
+    # Dimensions Labels
+    # Calculate Centroid for Outward Orientation
+    if scaled_points:
+        cx = sum([p[0] for p in scaled_points]) / len(scaled_points)
+        cy = sum([p[1] for p in scaled_points]) / len(scaled_points)
+    else:
+        cx, cy = 0, 0
+
+    for i in range(len(scaled_points)-1):
+        p1 = scaled_points[i]; p2 = scaled_points[i+1]
+        mx = (p1[0]+p2[0])/2; my = (p1[1]+p2[1])/2
+        dx = p2[0]-p1[0]; dy = p2[1]-p1[1]
+        l = math.sqrt(dx*dx+dy*dy)
+        if l==0: l=1
+        
+        # Initial Normal (Rotated -90 deg)
+        nx = dy/l; ny = -dx/l
+        
+        # Check Orientation against Centroid (Outward Check)
+        vec_out_x = mx - cx
+        vec_out_y = my - cy
+        dot = nx * vec_out_x + ny * vec_out_y
+        
+        # If pointing Inward (Dot < 0), Flip
+        if dot < 0:
+            nx = -nx; ny = -ny
+            
+        # Offset "Close" (User request)
+        offset = 10
+        
+        lx = mx + nx*offset; ly = my + ny*offset
+        
+        # Smart Anchoring based on Direction
+        anchor="middle"; baseline="middle"
+        if abs(nx) > abs(ny): # Horizontal-ish force
+            if nx > 0: anchor="start"; lx += 3 # Right
+            else: anchor="end"; lx -= 3 # Left
+        else: # Vertical-ish force
+            if ny > 0: baseline="hanging"; ly += 3 # Down
+            else: baseline="baseline"; ly -= 3 # Up
+        
+        try:
+             # Handle labels for m11 (Sur Mesure)
+             if type_p == "m11":
+                 seg_char = chr(65 + i) # A, B, C...
+                 txt = seg_char 
+             else:
+                 txt = PROFILES_DB[type_p]["params"][i]
+                 
+             svg_els.append(f'<text x="{lx}" y="{ly}" font-family="Arial" font-size="14" fill="red" font-weight="bold" text-anchor="{anchor}" dominant-baseline="{baseline}">{txt}</text>')
+        except: pass
+
+    # Face Labels
+    max_len = -1; best_idx = 0
+    if len(scaled_points) > 1:
+        for i in range(len(scaled_points)-1):
+            p1=scaled_points[i]; p2=scaled_points[i+1]
+            l = math.sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+            if l > max_len: max_len=l; best_idx=i
+        
+        p1=scaled_points[best_idx]; p2=scaled_points[best_idx+1]
+        mx=(p1[0]+p2[0])/2; my=(p1[1]+p2[1])/2
+        dx=p2[0]-p1[0]; dy=p2[1]-p1[1]
+        l=math.sqrt(dx*dx+dy*dy)
+        if l==0: l=1
+        nx=dy/l; ny=-dx/l
+        
+        f1_dist=70; f1_x=mx+nx*f1_dist; f1_y=my+ny*f1_dist
+        f2_dist=40; f2_x=mx-nx*f2_dist; f2_y=my-ny*f2_dist
+        style='font-family="Arial" font-size="12" fill="#666" font-style="italic" text-anchor="middle" dominant-baseline="middle"'
+        svg_els.append(f'<text x="{f1_x}" y="{f1_y}" {style}>FACE 2</text>')
+        svg_els.append(f'<text x="{f2_x}" y="{f2_y}" {style}>FACE 1</text>')
+
+    final_svg = f'<svg viewBox="0 0 {w_svg} {h_svg}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" style="background-color: white; width: 100%; height: auto;">'
+    final_svg += "".join(svg_els)
+    final_svg += '</svg>'
+    return final_svg
+
+def get_html_download_link(content_html, filename, label):
+    import base64
+    b64 = base64.b64encode(content_html.encode()).decode()
+    return f'<a href="data:text/html;base64,{b64}" download="{filename}" target="_blank" style="text-decoration:none; color:black; background-color:#f0f2f6; padding:8px 16px; border-radius:4px; border:1px solid #ccc;">📄 {label}</a>'
+
+def render_habillage_main_ui(cfg):
+    import datetime
+    prof = cfg['prof']
+    st.header(f"🧱 {prof['name']}") 
+    
+    dev = calc_developpe(cfg['key'], cfg['inputs'])
+    
+    c1, c2 = st.columns([2, 3])
+    
+    # Data Preparation
+    exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
+    # Use HTML break for better readability in export
+    dim_items = [f"<b>{k}</b> = {v}" for k,v in cfg['inputs'].items() if k not in exclude_keys]
+    dim_str_export = "<br>".join(dim_items)
+    dim_str_display = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    
+    surface = (dev * cfg['length'] * cfg['qte']) / 1000000
+    L_mm = cfg['length']
+    qty = cfg['qte']
+    
+    with c1:
+        st.subheader("Schéma de Principe")
+        image_path = os.path.join(ARTIFACT_DIR, prof['image_key'])
+        if os.path.exists(image_path):
+            st.image(image_path, use_container_width=True)
+        else:
+            st.warning(f"Image non trouvée: {prof['image_key']}")
+            st.caption(f"Chemin cherché: {image_path}") # Debug helper
+
+        st.markdown("---")
+        st.subheader("Informations Clés")
+        
+        st.metric("Développé Unitaire", f"{int(dev)} mm")
+        st.markdown(f"**Quantité :** {qty}")
+        st.markdown(f"**Dimensions :** {dim_str_display}")
+        st.markdown(f"**Longueur :** {L_mm} mm")
+        st.markdown(f"**Matière :** {cfg['finition']}")
+        st.markdown(f"**Couleur :** {cfg['couleur']}")
+
+    with c2:
+        st.subheader("Visualisation 3D")
+        svg = generate_profile_svg(cfg['key'], cfg['inputs'], cfg['length'], cfg['couleur'])
+        st.markdown(f'''
+        <div style="border: 1px solid #ddd; border-radius: 5px; padding: 10px; background-color: white; text-align: center;">
+            {svg}
+        </div>
+        ''', unsafe_allow_html=True)
+        st.caption("Vue filaire 3D indicative.")
+        
+        st.download_button("🖼️ Télécharger SVG", svg, f"profil_{cfg['ref']}.svg", "image/svg+xml")
+
+    st.markdown("---")
+    st.subheader("Récapitulatif (Habillage)")
+    
+    col_table, col_export = st.columns([3, 1])
+    
+    df_hab = pd.DataFrame({
+        "Libellé": ["Référence", "Modèle", "Quantité", "Dimensions", "Longueur", "Développé", "Surface Totale", "Matière", "Épaisseur", "Couleur"],
+        "Valeur": [
+            cfg['ref'], prof['name'], cfg['qte'], dim_str_display, f"{cfg['length']} mm", f"{dev} mm", 
+            f"{surface:.2f} m²", cfg['finition'], cfg['epaisseur'], cfg['couleur']
+        ]
+    })
+
+    with col_table:
+        st.table(df_hab)
+        
+    with col_export:
+        st.write("")
+        st.write("")
+        
+        hab_data = {
+            "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
+            "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
+            "finition": cfg['finition'], "epaisseur": cfg['epaisseur'], "couleur": cfg['couleur']
+        }
+        json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
+        st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
+
+        import base64
+        img_b64 = ""
+        if os.path.exists(image_path):
+             with open(image_path, "rb") as f:
+                 img_b64 = base64.b64encode(f.read()).decode()
+        
+        html_report = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Fiche Technique - {prof['name']}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+            <style>
+                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
+                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
+                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
+                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
+                .main-grid {{ display: grid; grid-template-columns: 40% 55%; gap: 5%; margin-bottom: 40px; }}
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
+                .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 15px; }}
+                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
+                .info-row:last-child {{ border: 0; }}
+                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 100px; }}
+                .dims-val {{ font-size: 16px; color: #2c3e50; text-align: left; }}
+                .dims-row {{ justify-content: flex-start; gap: 20px; }}
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
+                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
+                table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
+                th {{ background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 500; }}
+                td {{ border-bottom: 1px solid #ddd; padding: 10px; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9; }}
+                .footer {{ margin-top: 60px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
+                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
+            </style>
+        </head>
+        <body>
+            <div class="page-container">
+                <div class="header">
+                    <div>
+                        <h1>Fiche Technique</h1>
+                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">{prof['name']}</div>
+                    </div>
+                    <div class="ref" style="text-align: right;">
+                        <div>RÉFÉRENCE CHANTIER</div>
+                        <strong style="font-size: 18px; color: #000;">{cfg['ref']}</strong>
+                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                    </div>
+                </div>
+                
+                <div class="main-grid">
+                    <div>
+                        <h2>Schéma de Principe</h2>
+                        <div class="schema-box">
+                             <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; max-height: 200px;">
+                        </div>
+                        <h2>Caractéristiques</h2>
+                        <div class="info-box">
+                            <div class="info-row"><span class="label">Quantité</span> <span>{qty}</span></div>
+                            <div class="info-row"><span class="label">Longueur</span> <span>{L_mm} mm</span></div>
+                            <div class="info-row"><span class="label">Développé</span> <span>{int(dev)} mm</span></div>
+                            <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
+                            <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
+                            <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
+                            <div class="info-row dims-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+                                <span class="label">Dimensions</span> 
+                                <span class="dims-val">{dim_str_export}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h2>Visualisation 3D</h2>
+                        <div class="visual-box">
+                            {svg}
+                            <div style="margin-top: 15px; font-size: 12px; color: #999;">Vue filaire indicative</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <h2>Détails de Commande</h2>
+                <table>
+                    <thead><tr><th style="width: 40%;">Libellé</th><th>Valeur</th></tr></thead>
+                    <tbody>
+                        {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
+                    </tbody>
+                </table>
+                <div class="footer">Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>Merci de vérifier les cotes avant validation définitive.</div>
+            </div>
+            <script>
+                // Auto-print removed, purely manual now as per request to remove 'frame'.
+            </script>
+        </body>
+        </html>
+        """
+        st.download_button("📄 Imprimer (PDF)", html_report, f"fiche_{cfg['ref']}.html", "text/html", use_container_width=True)
+
+def render_habillage_sidebar_ui():
+    """Renders the Sidebar inputs for Habillage and returns the config dict."""
+    config = {}
+    
+    st.sidebar.markdown("### 🛠 Options Habillage")
+    
+    # 0. Identification
+    with st.sidebar.expander("1. Identification", expanded=False):
+        c_ref, c_qte = st.columns([2, 1])
+        ref_chantier = c_ref.text_input("Référence", value=st.session_state.get('ref_id', "Bavette F1"), key="hab_ref")
+        qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="hab_qte")
+        config["ref"] = ref_chantier
+        config["qte"] = qte_piece
+
+    # 1. Model Selection
+    profile_keys = list(PROFILES_DB.keys())
+    model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
+    
+    with st.sidebar.expander("2. Modèle & Dimensions", expanded=True):
+        selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=2)
+        
+        if selected_key == "m11":
+            # CUSTOM BUILDER
+            st.info("Mode Sur Mesure")
+            
+            # Init state
+            if 'custom_segments' not in st.session_state:
+                st.session_state['custom_segments'] = [{'type': 'start', 'val_L': 100}]
+            
+            segs = st.session_state['custom_segments']
+            
+            # Segment 1 (Start)
+            st.markdown(f"**Segment A (Départ)**")
+            segs[0]['val_L'] = st.number_input(f"Longueur A (mm)", 0, 1000, segs[0]['val_L'], key="cust_start_L")
+            
+            # Subsequent Segments
+            letter_idx = 1 # B
+            
+            for i, seg in enumerate(segs[1:], 1):
+                char_L = chr(65 + letter_idx)      # B, C...
+                char_H = chr(65 + letter_idx + 1)  # C, D...
+                
+                st.markdown(f"**Pli {i}**")
+                
+                # Angle Type
+                atype = st.selectbox(f"Angle Pli {i}", ["90", "45", "135", "Custom"], key=f"atype_{i}", index=["90","45","135","Custom"].index(seg.get('angle_type', '90')))
+                seg['angle_type'] = atype
+                
+                if atype == "Custom":
+                    c1, c2 = st.columns(2)
+                    seg['val_L'] = c1.number_input(f"L. {char_L} (mm)", 0, 1000, seg.get('val_L', 50), key=f"valL_{i}")
+                    seg['val_H'] = c2.number_input(f"H. {char_H} (mm)", 0, 1000, seg.get('val_H', 20), key=f"valH_{i}")
+                    letter_idx += 2 
+                else:
+                    seg['val_L'] = st.number_input(f"Long. {char_L} (mm)", 0, 1000, seg.get('val_L', 50), key=f"valL_{i}")
+                    letter_idx += 1
+                
+                st.markdown("---")
+            
+            # Buttons
+            c_add, c_del = st.columns(2)
+            if c_add.button("➕ Pli", key="btn_add_fold"):
+                segs.append({'type': 'fold', 'angle_type': '90', 'val_L': 50})
+                st.rerun()
+            
+            if len(segs) > 1 and c_del.button("➖ Pli", key="btn_del_fold"):
+                segs.pop()
+                st.rerun()
+                
+            # Maps for return
+            config["A"] = segs[0]['val_L']
+            # We don't map all dynamic keys to flat config dict easily, 
+            # but main render reads session_state for m11 anyway.
+            
+        else:
+            # STANDARD
+            prof = PROFILES_DB[selected_key]
+            params = prof["params"]
+            defaults = prof["defaults"]
+            
+            cols_input = st.columns(2)
+            for i, p in enumerate(params):
+                is_angle = p.startswith("A") and len(p) > 1 and p[1].isdigit() 
+                step = 5 if is_angle else 5
+                
+                with cols_input[i % 2]:
+                    label = f"Angle {p}" if is_angle else f"Cote {p}"
+                    val = st.number_input(label, value=int(defaults.get(p, 0)), step=int(step), key=f"hab_{selected_key}_{p}")
+                    config[p] = val
+                    
+        length = st.number_input("Longueur (mm)", value=3000, step=100, key="hab_len")
+        config["length"] = length # Ensure key matches usage
+
+    # 3. Finition
+    with st.sidebar.expander("3. Finition", expanded=False):
+        # Type Finition choices
+        type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
+        type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
+        
+        epaisseurs = ["75/100", "10/10", "15/10", "20/10", "30/10"]
+        epaisseur = st.selectbox("Épaisseur", epaisseurs, index=0, key="hab_ep")
+        
+        colors_list = ["Blanc 9016", "Gris 7016", "Noir 9005", "Chêne Doré", "RAL Spécifique"]
+        
+        couleur = "Standard"
+        
+        # Logic for Color Sections
+        if "Brut" in type_finition or "Galva" in type_finition:
+             st.info(f"Aspect : {type_finition}")
+             couleur = f"Sans ({type_finition})"
+             
+        elif "Laquage 1 face" == type_finition:
+             # Choice of face
+             face_choice = st.selectbox("Face à laquer", ["Face 1 (Extérieur)", "Face 2 (Intérieur)"], index=0)
+             # Color selection
+             couleur_st = st.selectbox("Couleur", colors_list, index=0, key="col_laq1")
+             if couleur_st == "RAL Spécifique":
+                 ral = st.text_input("Code RAL", "RAL ")
+                 couleur = f"{ral} ({face_choice})"
+             else:
+                 couleur = f"{couleur_st} ({face_choice})"
+                 
+        elif "Laquage 2 faces" == type_finition:
+             st.markdown("**Face 1 (Ext)**")
+             c1_st = st.selectbox("Couleur F1", colors_list, index=0, key="col_laq2_f1")
+             c1_val = c1_st
+             if c1_st == "RAL Spécifique": c1_val = st.text_input("RAL F1", "RAL ")
+             
+             st.markdown("**Face 2 (Int)**")
+             c2_st = st.selectbox("Couleur F2", colors_list, index=0, key="col_laq2_f2")
+             c2_val = c2_st
+             if c2_st == "RAL Spécifique": c2_val = st.text_input("RAL F2", "RAL ")
+
+             couleur = f"F1: {c1_val} / F2: {c2_val}"
+             
+        elif "Prélaqué 1 face" == type_finition:
+             # Face 1 defaults
+             couleur_st = st.selectbox("Couleur (Face 1)", colors_list, index=0, key="col_prelaq1")
+             config["couleur"] = couleur_st # Backwards compat
+             if couleur_st == "RAL Spécifique":
+                 couleur = st.text_input("Code RAL", "RAL ")
+             else:
+                 couleur = couleur_st
+                 
+        elif "Prélaqué 2 faces" == type_finition:
+             # Usually standard colors both sides or diff?
+             # Let's assume user picks one color for both or distinct?
+             # Industry standard: often same color or specific pairs.
+             # Let's offer generic choice.
+             st.markdown("**Face 1 & 2**")
+             couleur_st = st.selectbox("Couleur", colors_list, index=0, key="col_prelaq2")
+             couleur = f"{couleur_st} (2 faces)"
+
+        config["finition"] = type_finition
+        config["epaisseur"] = epaisseur
+        config["couleur"] = couleur
+
+    return {
+        "key": selected_key,
+        "prof": PROFILES_DB[selected_key],
+        "inputs": config, # Flattened config into inputs for compatibility
+        # Add discrete keys if needed by main ui
+        "ref": ref_chantier,
+        "qte": qte_piece,
+        "length": length,
+        "finition": type_finition, 
+        "epaisseur": epaisseur, 
+        "couleur": couleur
+    }
+
+
+
 # --- 2. INTERFACE SIDEBAR ---
 # --- 2. INTERFACE SIDEBAR ---
 # GESTION DE PROJET (V73)
@@ -1075,132 +2036,129 @@ st.sidebar.title("🛠️ Configuration")
 if st.sidebar.button("❌ Réinitialiser la configuration", key="btn_reset"):
     reset_config()
 
-# --- SECTION 1 : IDENTIFICATION ---
-with st.sidebar.expander("1. Identification", expanded=False):
-    c1, c2 = st.columns(2)
-    rep = c1.text_input("Repère", "F1", key="ref_id")
-    qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
+def render_menuiserie_sidebar_global():
+    global rep, qte, mat, ep_dormant, type_projet, type_pose, ail_val, ail_bas, col_int, col_ext
+    global l_dos_dormant, h_dos_dormant, h_allege, vr_opt, h_vr, vr_grille, h_menuiserie
+    global is_appui_rap, largeur_appui, txt_partie_basse, zones_config, cfg_global
 
-# --- SECTION 2 : MATERIAU ---
-with st.sidebar.expander("2. Matériau & Ailettes", expanded=False):
-    mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
+    # --- SECTION 1 : IDENTIFICATION ---
+    with st.sidebar.expander("1. Identification", expanded=False):
+        c1, c2 = st.columns(2)
+        rep = c1.text_input("Repère", "F1", key="ref_id")
+        qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
 
-    if mat == "PVC":
-        liste_ailettes_std = [0, 30, 40, 60]
-        liste_couleurs = ["Blanc (9016)", "Plaxé Chêne", "Plaxé Gris 7016", "Beige"]
-    else: 
-        liste_ailettes_std = [0, 20, 35, 60, 65]
-        liste_couleurs = ["Blanc (9016)", "Gris 7016 Texturé", "Noir 2100 Sablé", "Anodisé Argent"]
+    # --- SECTION 2 : MATERIAU ---
+    with st.sidebar.expander("2. Matériau & Ailettes", expanded=False):
+        mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
-    ep_dormant = st.number_input("Épaisseur Dormant (mm)", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
+        if mat == "PVC":
+            liste_ailettes_std = [0, 30, 40, 60]
+            liste_couleurs = ["Blanc (9016)", "Plaxé Chêne", "Plaxé Gris 7016", "Beige"]
+        else: 
+            liste_ailettes_std = [0, 20, 35, 60, 65]
+            liste_couleurs = ["Blanc (9016)", "Gris 7016 Texturé", "Noir 2100 Sablé", "Anodisé Argent"]
 
-    st.write("---")
-    # NOUVEAU : TYPE DE POSE
-    # Remplacement Checkbox par Radio Horizontal (Style PVC/ALU)
-    type_projet = st.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
-    
-    if type_projet == "Rénovation":
-        liste_pose = ["Pose en rénovation (R)", "Pose en rénovation Dépose Totale (RT)"]
-    else:
-        liste_pose = ["Pose en applique avec doublage (A)", "Pose en applique avec embrasures (E)", 
-                      "Pose en feuillure (F)", "Pose en tunnel nu intérieur (T)", "Pose en tunnel milieu de mur (TM)"]
-    
-    type_pose = st.selectbox("Type de Pose", liste_pose, key="pose_type")
+        ep_dormant = st.number_input("Épaisseur Dormant (mm)", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
 
-    st.write("---")
-    ail_val = st.selectbox(f"Ailettes H/G/D ({mat})", liste_ailettes_std, index=len(liste_ailettes_std)-1, key="fin_val")
-    bas_identique = st.checkbox("Seuil (Bas) identique ?", False, key="same_bot")
-    ail_bas = ail_val if bas_identique else st.selectbox(f"Seuil / Bas ({mat})", liste_ailettes_std, index=0, key="fin_bot")
-
-    # CONFIG PARTIE BASSE (Seuil)
-    st.write("---")
-    st.markdown("**Partie Basse**")
-    is_appui_rap = st.checkbox("Appui rapporté ?", False, key="is_appui_rap")
-    largeur_appui = 0
-    if is_appui_rap:
-        largeur_appui = st.number_input("Largeur Appui (mm)", 0, 500, 100, step=10, key="width_appui")
-        txt_partie_basse = f"Appui Rapporté (Largeur {largeur_appui}mm)"
-    else:
-        txt_partie_basse = "Bavette 100x100 mm"
-        st.caption("Défaut : Bavette 100x100 mm")
-
-    st.write("---")
-    col_int = st.selectbox("Couleur Int", liste_couleurs, key="col_in")
-    col_ext = st.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
-
-# --- SECTION 3 : DIMENSIONS ---
-with st.sidebar.expander("3. Dimensions & VR", expanded=True):
-    c3, c4 = st.columns(2)
-    
-    # Libellé dynamique pour la Hauteur
-    lbl_hauteur = "Hauteur dessus rejingo" if is_appui_rap else "Hauteur Dos Dormant (mm)"
-    
-    l_dos_dormant = c3.number_input("Largeur Dos Dormant (mm)", 300, 5000, 1200, 10, key="width_dorm")
-    h_dos_dormant = c4.number_input(lbl_hauteur, 300, 5000, 1400, 10, help="Hauteur totale incluant le coffre", key="height_dorm")
-    
-    # Hauteur d'Allège
-    h_allege = st.number_input("Hauteur d'Allège (mm)", 0, 2500, 900, step=10, key="h_allege")
-
-    vr_opt = st.toggle("Volet Roulant", False, key="vr_enable")
-    h_vr = 0
-    vr_grille = False
-    if vr_opt:
-        h_vr = st.number_input("Hauteur Coffre", 0, 500, 185, 10, key="vr_h")
-        vr_grille = st.checkbox("Grille d'aération sur Coffre ?", key="vr_g")
-        h_menuiserie = h_dos_dormant - h_vr
-        st.markdown(f"""<div class="metric-box">🧮 H. Menuiserie : {int(h_menuiserie)} mm</div>""", unsafe_allow_html=True)
-    else:
-        h_menuiserie = h_dos_dormant
-
-# --- SECTION 4 : STRUCTURE & FINITIONS ---
-with st.sidebar.expander("4. Structure & Finitions", expanded=True):
-    # mode_structure = st.radio("Mode Structure", ["Simple (1 Zone)", "Divisée (2 Zones)"], horizontal=True, key="struct_mode", index=0)
-    st.caption("Configurez les zones ci-dessous (Cochez 'Diviser' pour séparer)")
-
-    # Initialisation de l'arbre si absent
-    if 'zone_tree' not in st.session_state:
-        st.session_state['zone_tree'] = init_node('root')
+        st.write("---")
+        # NOUVEAU : TYPE DE POSE
+        # Remplacement Checkbox par Radio Horizontal (Style PVC/ALU)
+        type_projet = st.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
         
-    # Rendu UI Récursif (DIRECTEMENT dans le container de l'expander actuel)
-    # config_container = st.container() # Inutile si on est déjà dans l'expander 4
-    render_node_ui(st.session_state['zone_tree'], l_dos_dormant, h_menuiserie)
-         
-    # Calcul des zones à plat pour le dessin
-    zones_config = flatten_tree(st.session_state['zone_tree'], 0, 0, l_dos_dormant, h_menuiserie)
-    
-    # DEBUG OUTPUT
-    # st.write("DEBUG ZONES:", zones_config)
-    # st.write("DEBUG COLOR GLASS:", cfg_global['color_glass'])
-    # st.write("DEBUG COLOR FRAME:", cfg_global['color_frame'])
+        if type_projet == "Rénovation":
+            liste_pose = ["Pose en rénovation (R)", "Pose en rénovation Dépose Totale (RT)"]
+        else:
+            liste_pose = ["Pose en applique avec doublage (A)", "Pose en applique avec embrasures (E)", 
+                          "Pose en feuillure (F)", "Pose en tunnel nu intérieur (T)", "Pose en tunnel milieu de mur (TM)"]
+        
+        type_pose = st.selectbox("Type de Pose", liste_pose, key="pose_type")
 
-    # Note: color_map et cfg_global sont définis plus bas mais cfg_global est nécessaire pour generate_svg
-    # On doit s'assurer que cfg_global est défini AVANT qu'on l'utilise ? 
-    # generate_svg_v73 utilise cfg_global qui est défini LIGNE 583 (plus bas).
-    # Mais zones_config est utilisé dans generate_svg_v73 qui est appelé APRES.
-    # Donc ça va.
-    # Attention: flatten_tree n'a pas besoin de cfg_global.
-    
-    # Juste vérifier si color_map est utilisé dans render_node_ui ? Non.
-    # config_zone_ui ne l'utilise pas pour les choix de couleurs ? 
-    # config_zone_ui utilise VITRAGES_EXT, VITRAGES_INT qui sont globaux.
-    
-    # OK. Insertion.
+        st.write("---")
+        ail_val = st.selectbox(f"Ailettes H/G/D ({mat})", liste_ailettes_std, index=len(liste_ailettes_std)-1, key="fin_val")
+        bas_identique = st.checkbox("Seuil (Bas) identique ?", False, key="same_bot")
+        ail_bas = ail_val if bas_identique else st.selectbox(f"Seuil / Bas ({mat})", liste_ailettes_std, index=0, key="fin_bot")
 
-    color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
-    hex_col = "#FFFFFF"
-    # DEBUG COLOR
-    # st.sidebar.write(f"DEBUG COLOR: col_int='{col_int}'")
-    for k, v in color_map.items():
-        if k in col_int: 
-            hex_col = v
-            # st.sidebar.write(f"MATCH: {k} -> {v}")
+        # CONFIG PARTIE BASSE (Seuil)
+        st.write("---")
+        st.markdown("**Partie Basse**")
+        is_appui_rap = st.checkbox("Appui rapporté ?", False, key="is_appui_rap")
+        largeur_appui = 0
+        if is_appui_rap:
+            largeur_appui = st.number_input("Largeur Appui (mm)", 0, 500, 100, step=10, key="width_appui")
+            txt_partie_basse = f"Appui Rapporté (Largeur {largeur_appui}mm)"
+        else:
+            txt_partie_basse = "Bavette 100x100 mm"
+            st.caption("Défaut : Bavette 100x100 mm")
 
-    cfg_global = {
-        'color_frame': hex_col,
-        'color_glass': "#d6eaff"
-    }
+        st.write("---")
+        col_int = st.selectbox("Couleur Int", liste_couleurs, key="col_in")
+        col_ext = st.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
+
+    # --- SECTION 3 : DIMENSIONS ---
+    with st.sidebar.expander("3. Dimensions & VR", expanded=False):
+        c3, c4 = st.columns(2)
+        
+        # Libellé dynamique pour la Hauteur
+        lbl_hauteur = "Hauteur dessus rejingo" if is_appui_rap else "Hauteur Dos Dormant (mm)"
+        
+        l_dos_dormant = c3.number_input("Largeur Dos Dormant (mm)", 300, 5000, 1200, 10, key="width_dorm")
+        h_dos_dormant = c4.number_input(lbl_hauteur, 300, 5000, 1400, 10, help="Hauteur totale incluant le coffre", key="height_dorm")
+        
+        # Hauteur d'Allège
+        h_allege = st.number_input("Hauteur d'Allège (mm)", 0, 2500, 900, step=10, key="h_allege")
+
+        vr_opt = st.toggle("Volet Roulant", False, key="vr_enable")
+        h_vr = 0
+        vr_grille = False
+        if vr_opt:
+            h_vr = st.number_input("Hauteur Coffre", 0, 500, 185, 10, key="vr_h")
+            vr_grille = st.checkbox("Grille d'aération sur Coffre ?", key="vr_g")
+            h_menuiserie = h_dos_dormant - h_vr
+            st.markdown(f"""<div class="metric-box">🧮 H. Menuiserie : {int(h_menuiserie)} mm</div>""", unsafe_allow_html=True)
+        else:
+            h_menuiserie = h_dos_dormant
+
+    # --- SECTION 4 : STRUCTURE & FINITIONS ---
+    with st.sidebar.expander("4. Structure & Finitions", expanded=False):
+        # mode_structure = st.radio("Mode Structure", ["Simple (1 Zone)", "Divisée (2 Zones)"], horizontal=True, key="struct_mode", index=0)
+        st.caption("Configurez les zones ci-dessous (Cochez 'Diviser' pour séparer)")
+
+        # Initialisation de l'arbre si absent
+        if 'zone_tree' not in st.session_state:
+            st.session_state['zone_tree'] = init_node('root')
+            
+        # Rendu UI Récursif
+        render_node_ui(st.session_state['zone_tree'], l_dos_dormant, h_menuiserie)
+             
+        # Calcul des zones à plat pour le dessin
+        zones_config = flatten_tree(st.session_state['zone_tree'], 0, 0, l_dos_dormant, h_menuiserie)
+        
+        color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
+        hex_col = "#FFFFFF"
+        for k, v in color_map.items():
+            if k in col_int: 
+                hex_col = v
+
+        cfg_global = {
+            'color_frame': hex_col,
+            'color_glass': "#d6eaff"
+        }
+
+# --- NAVIGATION LOGIC (INSERTED AFTER DEFINITIONS) ---
+st.sidebar.markdown("---")
+# Use segmented control for cleaner look if available, else radio
+nav_options = ["Menuiserie", "Habillage"]
+nav_mode = st.sidebar.radio("Module", nav_options, horizontal=True, label_visibility="collapsed")
+
+hab_config = None
+
+if nav_mode == "Menuiserie":
+    st.sidebar.title("🛠️ Configuration")
+    render_menuiserie_sidebar_global()
+else:
+    st.sidebar.title("🧱 Configuration")
+    hab_config = render_habillage_sidebar_ui()
     
-
 
 
 
@@ -1411,88 +2369,255 @@ def generate_svg_v73():
         return f'<svg width="600" height="200" viewBox="0 0 600 200"><rect width="600" height="200" fill="#fee"/><text x="10" y="30" fill="red" font-family="monospace" font-size="12">Erreur: {str(e)}</text><text x="10" y="50" fill="red" font-family="monospace" font-size="10">{traceback.format_exc().split("line")[-1]}</text></svg>'
 
 
+# ==============================================================================
+# --- MODULE HABILLAGE (INTÉGRÉ) ---
+# ==============================================================================
+
+# Base directory for artifacts
+# Base directory for artifacts
+# (Déplacé en haut de fichier pour portée globale)
+
+# Define Profile Models based on User Images (1-5)
+
+# Define Profile Models based on User Images (1-5)
+
+
+
 # --- RENDU FINAL (NOUVELLE MISE EN PAGE V72) ---
 
-# 1. TITRE ET DESSIN CENTRÉS
-st.markdown("<h2 class='centered-header'>Plan Technique</h2>", unsafe_allow_html=True)
+# --- TABS ---
+# 1. Menuiserie (Existant)
+# 2. Habillage (Nouveau)
 
-# Generate SVG once
-svg_output = generate_svg_v73()
+# --- NAVIGATION SWITCH (V74) replaced Tabs ---
+if nav_mode == "Menuiserie":
+    # 1. TITRE ET DESSIN CENTRÉS
+    st.markdown("<h2 class='centered-header'>Plan Technique</h2>", unsafe_allow_html=True)
 
-c_spacer1, c_draw, c_spacer2 = st.columns([1, 3, 1])
-with c_draw:
-    st.markdown(svg_output, unsafe_allow_html=True)
+    try:
+        svg_output = generate_svg_v73()
+        st.markdown(f"<div class='centered-svg'>{svg_output}</div>", unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Erreur SVG: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
-st.markdown("---")
+    # 2. RÉCAPITULATIF (SOUS LE DESSIN)
+    st.markdown("---")
+    st.markdown("<h3 class='centered-header'>Récapitulatif - Bon de Commande</h3>", unsafe_allow_html=True)
 
-# 2. RÉCAPITULATIF EN DESSOUS (Sur 2 colonnes)
-st.markdown("<h3 class='centered-header'>Récapitulatif - Bon de Commande</h3>", unsafe_allow_html=True)
+    # PREPARE ZONES DATA (Before Columns)
+    config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
+    sorted_zones = sorted(config_display, key=lambda z: z['id'])
 
-c_table, c_details = st.columns([1, 1])
+    c_recap_left, c_recap_right = st.columns([1, 1])
 
-with c_table:
-    st.subheader("Informations Générales")
-    # Description structure générée depuis l'arbre ou générique
-    nb_zones = len(zones_config)
-    desc_structure = f"Personnalisée ({nb_zones} Zones)" if nb_zones > 1 else "Simple (1 Zone)"
-    
-    vr_txt = "Non"
-    if vr_opt:
-        vr_txt = f"Coffre {h_vr}mm"
-        if vr_grille: vr_txt += " + Grille sur Coffre"
-    
-    data = {
-        "Repère": rep,
-        "Quantité": qte,
-        "Dim. Dos Dormant": f"{l_dos_dormant} x {h_dos_dormant} mm",
-        "Matériau": f"{mat} (Dormant {ep_dormant}mm)",
-        "Type de Pose": type_pose,
-        "Partie Basse": txt_partie_basse,
-        "Couleur": f"Int: {col_int} / Ext: {col_ext}",
-        "Structure": desc_structure,
-        "VR": vr_txt,
-        "Ailettes": f"H:{ail_val}/G:{ail_val}/D:{ail_val}/B:{ail_bas}"
-    }
-    st.table(data)
-    
-    # BOUTON EXPORT PDF (HTML)
-    proj_name = st.session_state['project']['name']
-    ref_name = st.session_state.get('ref_id', 'F1')
-    html_report = generate_html_report(proj_name, ref_name, svg_output, data)
-    
-    st.download_button(
-        label="🖨️ Télécharger Fiche (PDF/Print)",
-        data=html_report,
-        file_name=f"Fiche_{ref_name}.html",
-        mime="text/html",
-        help="Téléchargez le fichier HTML, ouvrez-le et faites 'Imprimer -> Enregistrer au format PDF'"
-    )
-
-with c_details:
-    st.subheader("Détail des Zones")
-    for i, z in enumerate(zones_config):
-        t = z['type']
-        p = z['params']
-        st.markdown(f"#### Zone {i+1} : {t}")
+    with c_recap_left:
+        st.subheader("Informations Générales")
         
-        details = []
-        if 'sens' in p: details.append(f"Sens : {p['sens']}")
-        if 'principal' in p: details.append(f"Principal : {p['principal']}")
-        if p.get('ob'): details.append("Oscillo-battant : Oui")
+        # Safe Access to Keys
+        s = st.session_state
         
-        if 'traverses' in p and p['traverses'] == 1:
-             details.append(f"Soubassement : {p['remp_bas']} (Bas) / {p['remp_haut']} (Haut)")
-             if p.get('pos_traverse') == 'Sur mesure (du bas)':
-                  details.append(f"Hauteur Traverse : {p['h_traverse_custom']}mm (axe depuis bas vitrage)")
-        elif 'remplissage_global' in p:
-             details.append(f"Remplissage : {p['remplissage_global']}")
-             
-        v_ext = p.get('vitrage_ext', '-')
-        v_int = p.get('vitrage_int', '-')
-        details.append(f"Vitrage : Ext {v_ext} / Int {v_int}")
+        # Partie Basse Logic reconstruction
+        if s.get('is_appui_rap', False):
+            pb_txt = f"Appui Rapporté (Largeur {s.get('width_appui', 0)}mm)"
+        else:
+            pb_txt = "Bavette 100x100 mm"
             
-        if p.get('pos_grille', 'Aucune') != 'Aucune': details.append(f"Grille Aération : Oui ({p['pos_grille']})")
+        # VR Logic
+        vr_txt = "Oui" if s.get('vr_enable', False) else "Non"
         
-        for d in details:
-            st.write(f"- {d}")
-        st.write("---")
+        # Ailettes Logic (From fin_val / fin_bot)
+        h_ail = s.get('fin_val', 0)
+        b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
+        # Assuming H/G/D are same 'fin_val'
+        ailes_txt = f"H:{h_ail}/G:{h_ail}/D:{h_ail}/B:{b_ail}"
+
+        # Nb Zones calculation
+        # We can't access 'zones_config' easily here as it's local to Sidebar context.
+        # But we can check 'zone_tree'
+        try:
+            nb_zones = len(flatten_tree(s.get('zone_tree'), 0,0,0,0))
+        except: nb_zones = 1
+
+        df_infos = pd.DataFrame({
+            "value": [
+                s.get('ref_id', 'F1'),
+                s.get('qte_val', 1),
+                f"{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm",
+                f"{s.get('mat_type', 'PVC')} (Dormant {s.get('frame_thig', 70)}mm)",
+                s.get('pose_type', '-'),
+                pb_txt,
+                f"Int: {s.get('col_in', '-')} / Ext: {s.get('col_ex', '-')}",
+                f"{nb_zones} Zone(s)",
+                vr_txt,
+                ailes_txt
+            ]
+        }, index=[
+            "Repère", "Quantité", "Dim. Dos Dormant", "Matériau", "Type de Pose", "Partie Basse", "Couleur", "Structure", "VR", "Ailettes"
+        ])
+        st.dataframe(df_infos, use_container_width=True)
+        
+        # BOUTON EXPORT JSON
+        # BOUTON EXPORT PDF (HTML PRO)
+        import base64
+        import datetime
+        
+        # Prepare Data for Report
+        # Encode SVG for embedding
+        svg_b64 = base64.b64encode(svg_output.encode("utf-8")).decode("utf-8")
+        
+        # Zone details formatted for HTML
+        zones_html_rows = ""
+        for z in sorted_zones:
+            d_list = []
+            remp = z['params'].get('remplissage_global', 'Vitrage')
+            d_list.append(f"Remplissage: {remp}")
+            if remp == "Vitrage":
+                d_list.append(f"Vitrage: Ext {z['params'].get('vitrage_ext','4')} / Int {z['params'].get('vitrage_int','4')}")
+            if z['params'].get('grille_aera'): d_list.append(f"Grille: {z['params'].get('pos_grille')}")
+            if 'sens' in z['params']: d_list.append(f"Sens: {z['params']['sens']}")
+            
+            details_str = ", ".join(d_list)
+            zones_html_rows += f"<tr><td><strong>{z['label']}</strong> ({z['type']})</td><td>{details_str}</td></tr>"
+
+        menuiserie_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Fiche Technique - {s.get('ref_id', 'Menuiserie')}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+            <style>
+                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
+                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
+                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
+                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
+                
+                /* STACKED LAYOUT */
+                .container {{ margin-bottom: 40px; }}
+                
+                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; margin-top: 30px; }}
+                
+                /* VISUAL (TOP, BIG) */
+                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 500px; margin-bottom: 40px; }}
+                .visual-box svg {{ width: 100%; height: auto; max-height: 800px; display: block; margin: auto; }}
+                
+                /* INFO (BOTTOM, FULL WIDTH) */
+                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; column-count: 2; column-gap: 40px; }}
+                .info-row {{ display: flex; justify-content: flex-start; align-items: baseline; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; break-inside: avoid; }}
+                .info-row:last-child {{ border: 0; }}
+                .label {{ font-weight: bold; color: #555; white-space: nowrap; width: 150px; min-width: 150px; display: inline-block; }}
+                
+                table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
+                th {{ background: #2c3e50; color: white; padding: 10px; text-align: left; }}
+                td {{ border-bottom: 1px solid #ddd; padding: 8px; }}
+                .footer {{ margin-top: 50px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
+                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} .info-box {{ column-count: 2; }} }}
+            </style>
+        </head>
+        <body>
+            <div class="page-container">
+                <div class="header">
+                    <div>
+                        <h1>Fiche Technique</h1>
+                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">Menuiserie {s.get('mat_type', 'PVC')}</div>
+                    </div>
+                    <div class="ref" style="text-align: right;">
+                        <div>RÉFÉRENCE CHANTIER</div>
+                        <strong style="font-size: 18px; color: #000;">{s.get('ref_id', 'F1')}</strong>
+                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                    </div>
+                </div>
+
+                <div class="container">
+                    <!-- 1. PLAN TECHNIQUE (LARGE) -->
+                    <h2>Plan Technique</h2>
+                    <div class="visual-box">
+                        {svg_output}
+                    </div>
+                    
+                    <!-- 2. CARACTERISTIQUES (BELOW) -->
+                    <h2>Caractéristiques Générales</h2>
+                    <div class="info-box">
+                        <div class="info-row"><span class="label">Quantité</span> <span>{s.get('qte_val', 1)}</span></div>
+                        <div class="info-row"><span class="label">Dimensions</span> <span>{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm</span></div>
+                        <div class="info-row"><span class="label">Dormant</span> <span>{s.get('frame_thig', 70)} mm</span></div>
+                        <div class="info-row"><span class="label">Pose</span> <span>{s.get('pose_type', '-')}</span></div>
+                        <div class="info-row"><span class="label">Partie Basse</span> <span>{pb_txt}</span></div>
+                        <div class="info-row"><span class="label">Couleur Int</span> <span>{s.get('col_in', '-')}</span></div>
+                        <div class="info-row"><span class="label">Couleur Ext</span> <span>{s.get('col_ex', '-')}</span></div>
+                        <div class="info-row"><span class="label">Volet Roulant</span> <span>{vr_txt}</span></div>
+                        <div class="info-row"><span class="label">Ailettes</span> <span>{ailes_txt}</span></div>
+                    </div>
+                </div>
+                
+                <h2>Détail des Zones</h2>
+                <table>
+                    <thead><tr><th style="width: 35%;">Zone</th><th>Détails Technique</th></tr></thead>
+                    <tbody>
+                        {zones_html_rows}
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                    Document généré par le Calculateur Menuiserie.<br>
+                    Les côtes sont "Dos de Dormant". Merci de vérifier avant validation.
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        st.download_button(
+            label="📄 Enregistrer PDF (Fiche Technique)",
+            data=menuiserie_html,
+            file_name=f"Fiche_{s.get('ref_id', 'F1')}.html",
+            mime="text/html"
+        )
+
+    with c_recap_right:
+        st.subheader("Détail des Zones")
+        config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
+        
+        sorted_zones = sorted(config_display, key=lambda z: z['id'])
+        
+        for z in sorted_zones:
+            # Clean Title "Zone X : Type"
+            # Remove "Zone " from z['label'] if explicit? No logic needed if label is clean.
+            # Assuming z['label'] is "Zone 1"
+            st.markdown(f"#### {z['label']} : {z['type']}")
+            
+            # Details: Remplissage, Vitrage, Grille
+            details_list = []
+            
+            # Remplissage
+            remp_global = z['params'].get('remplissage_global', 'Vitrage')
+            details_list.append(f"Remplissage : {remp_global}")
+            
+            # Vitrage details if applicable
+            if remp_global == "Vitrage":
+                v_txt = f"Ext {z['params'].get('vitrage_ext', '4mm')} / Int {z['params'].get('vitrage_int', '4mm')}"
+                details_list.append(f"Vitrage : {v_txt}")
+            
+            # Grille
+            if z['params'].get('grille_aera', False):
+                pos_g = z['params'].get('pos_grille', 'Vtl Principal')
+                details_list.append(f"Grille Aération : Oui ({pos_g})")
+                
+            # Sens
+            if 'sens' in z['params']:
+                 details_list.append(f"Sens : {z['params']['sens']}")
+
+            # Formatting as bullet points
+            for d in details_list:
+                st.markdown(f"- {d}")
+                
+            st.markdown("---")
+
+else:
+    if hab_config:
+        render_habillage_main_ui(hab_config)
+
+# END OF CODE V73.5 (VALIDATED)
