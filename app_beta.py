@@ -96,10 +96,16 @@ def init_project_state():
             "name": "Nouveau Projet",
             "configs": [] # List of dicts: {id, ref, data}
         }
-        # Create initial default config if empty
-        if not st.session_state['project']['configs']:
-            default_data = serialize_config() # Captures current (default) state
-            add_config_to_project(default_data, "F1")
+    
+    # Ensure mode_module exists immediately
+    if 'mode_module' not in st.session_state:
+        st.session_state['mode_module'] = 'Menuiserie'
+        
+    # DELETED: Default F1 creation. 
+    # User wants empty list on startup.
+    # if not st.session_state['project']['configs']:
+    #     default_data = serialize_config()
+    #     add_config_to_project(default_data, "F1")
 
 def serialize_config():
     """Capture l'état actuel de la configuration (Session State) dans un dictionnaire."""
@@ -128,6 +134,10 @@ def serialize_config():
             
         # EXCLUDE BUTTONS
         if isinstance(k, str):
+             # FLUSH BUTTON KEYS: catch anything with 'btn'
+             if 'btn' in k:
+                 continue
+             # Keep old check just in case
              if k.endswith('_btn') or k.startswith('btn_'):
                  continue
             
@@ -154,6 +164,10 @@ def deserialize_config(data):
         
     # 2. Load new data
     for k, v in data.items():
+        # MORE ROBUST FILTERING on load
+        if isinstance(k, str) and ('btn' in k):
+            continue
+            
         # Filter out buttons if they snuck in (Backwards compatibility)
         if isinstance(k, str) and (k.endswith('_btn') or k.startswith('btn_')):
             continue
@@ -252,16 +266,15 @@ def render_top_navigation():
         # Existing configs might not have it. Default to 'Menuiserie'.
         # We'll filter the dropdown.
         
-        filtered_configs = []
-        for c in configs:
-            c_type = c['data'].get('mode_module', 'Menuiserie')
-            if c_type == st.session_state['mode_module']:
-                filtered_configs.append(c)
+        # V74 FIX: Unified List (User Request)
+        # Show ALL configs regardless of type, chronologically.
+        filtered_configs = configs 
         
         if not filtered_configs:
-            # st.caption(f"Aucune config {st.session_state['mode_module']}")
             options = {}
         else:
+            # Show Type in label for clarity? e.g. "F1 (Menuiserie)" or just "F1"
+            # User example: "F1, H1, H2, F2"
             options = {c['id']: f"{c['ref']}" for c in filtered_configs}
             
         # Selectbox for OPENING
@@ -269,10 +282,19 @@ def render_top_navigation():
         # Or just standard selectbox.
         
         if options:
+            # V74 FIX: Handle pending selection (conflict avoidance)
+            if 'pending_new_id' in st.session_state:
+                target_id = st.session_state.pop('pending_new_id')
+                if target_id in options:
+                    st.session_state['mgr_sel_id'] = target_id
+            
             if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
                 st.session_state['mgr_sel_id'] = list(options.keys())[0]
                 
-            c_l_sel, c_l_act = st.columns([3, 1])
+            if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
+                st.session_state['mgr_sel_id'] = list(options.keys())[0]
+                
+            c_l_sel, c_l_btn = st.columns([2, 1])
             sel_id = c_l_sel.selectbox(
                 "Configurations Enregistrées", 
                 options.keys(), 
@@ -281,19 +303,66 @@ def render_top_navigation():
                 label_visibility="collapsed"
             )
             
-            with c_l_act:
-                 if st.button("📂 Ouvrir", use_container_width=True):
-                    target = next((c for c in configs if c['id'] == sel_id), None)
-                    if target:
-                        deserialize_config(target['data'])
-                        st.session_state['active_config_id'] = target['id']
-                        st.session_state['ref_id'] = target['ref'] # Sync Name
-                        st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie') # Sync Mode
-                        st.toast(f"Ouverture de '{target['ref']}'...")
+            with c_l_btn:
+                 # STATE MACHINE FOR CONFIRMATION
+                 # Keys: 'confirm_action': 'open' | 'delete' | None
+                 #       'confirm_target_id': id
+                 
+                 # Helper to clear state
+                 def clear_confirm():
+                     st.session_state.pop('confirm_action', None)
+                     st.session_state.pop('confirm_target_id', None)
+                     
+                 # Check if we are in confirmation mode for THIS selected item (or generic)
+                 current_action = st.session_state.get('confirm_action')
+                 target_id = st.session_state.get('confirm_target_id')
+                 
+                 if current_action and target_id == sel_id:
+                     # SHOW CONFIRMATION UI REPLACING BUTTONS
+                     ref_name = options.get(target_id, "???")
+                     if current_action == 'open':
+                         # FIXED: Proper newline for Streamlit MD/Info
+                         msg = f"⚠️ **Ouvrir '{ref_name}' ?**\n\n(Toutes modifications non sauvegardées seront perdues)"
+                     else:
+                         msg = f"🗑️ **Supprimer '{ref_name}' ?**\n\n(Cette action est irréversible)"
+                         
+                     st.info(msg) # Use Info or Warning to make it distinct
+                     cc_yes, cc_no = st.columns(2)
+                     if cc_yes.button("✅ OUI", use_container_width=True, key="btn_yes"):
+                         target = next((c for c in configs if c['id'] == target_id), None)
+                         if current_action == 'open' and target:
+                             deserialize_config(target['data'])
+                             st.session_state['active_config_id'] = target['id']
+                             st.session_state['ref_id'] = target['ref']
+                             st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie')
+                             st.toast(f"Ouverture de '{target['ref']}'...")
+                             clear_confirm()
+                             st.rerun()
+                         elif current_action == 'delete':
+                             delete_config_from_project(target_id)
+                             st.toast(f"Suppression de '{ref_name}' effectuée.")
+                             # If deleted, select another one? Handled by next render.
+                             clear_confirm()
+                             st.rerun()
+                             
+                     if cc_no.button("❌ NON", use_container_width=True, key="btn_no"):
+                         clear_confirm()
+                         st.rerun()
+                         
+                 else:
+                     # STANDARD BUTTONS
+                     cb_open, cb_del = st.columns(2)
+                     if cb_open.button("📂 Ouvrir", use_container_width=True, help="Ouvrir (Perd les modifs non sauvegardées)"):
+                        st.session_state['confirm_action'] = 'open'
+                        st.session_state['confirm_target_id'] = sel_id
                         st.rerun()
                         
-                 # Supprimer logic could be in a popover or next to it.
-                 # Let's keep it simple for now. 
+                     if cb_del.button("🗑️ Suppr.", use_container_width=True, help="Supprimer définitivement"):
+                        st.session_state['confirm_action'] = 'delete'
+                        st.session_state['confirm_target_id'] = sel_id
+                        st.rerun()
+                        
+    # 3. Active Status Bar 
                  
     # 3. Active Status Bar
     active_id = st.session_state.get('active_config_id')
@@ -463,7 +532,44 @@ def flatten_tree(node, current_x, current_y, current_w, current_h):
             flat_zones.extend(flatten_tree(node['children'][1], current_x + w1, current_y, w2, current_h))
     return flat_zones
 
-# --- HELPERS UI ---
+# --- HELPER: AUTO-INCREMENT REFERENCE (GLOBAL) ---
+def get_next_project_ref():
+    """
+    Parcourt toutes les configurations du projet pour trouver le prochain numéro de repère disponible.
+    S'harmonise entre Menuiserie et Habillage.
+    Format par defaut: "Repère N"
+    """
+    import re
+    max_num = 0
+    pattern = re.compile(r'(\d+)$')
+    
+    # 1. Check existing configs in project
+    if 'project' in st.session_state and 'configs' in st.session_state['project']:
+        for cfg in st.session_state['project']['configs']:
+            ref = cfg.get('ref', '')
+            match = pattern.search(ref)
+            if match:
+                try:
+                    num = int(match.group(1))
+                    if num > max_num:
+                        max_num = num
+                except:
+                    pass
+                    
+    # 2. Check current active input (to avoid collision if user is typing)
+    # Actually, we want to suggest the NEXT available.
+    
+    return f"Repère {max_num + 1}"
+
+def get_next_ref(current_ref):
+    """
+    Incrémente la partie numérique d'une référence spécifique (Locale).
+    Utilisé si on veut incrémenter par rapport à ce qu'on vient de saisir.
+    MAIS le client veut une harmonisation globale.
+    """
+    return get_next_project_ref() # OVERRIDE TO USE GLOBAL LOGIC
+
+# --- HELPER: GENERATION DU SVG (PARTIE 3 - CUSTOM PROFILES) ---
 TYPES_OUVRANTS = ["Fixe", "1 Vantail", "2 Vantaux", "Coulissant", "Soufflet"]
 VITRAGES_INT = ["4mm", "33.2 (Sécurité)", "44.2 (Effraction)", "44.2 Silence"]
 VITRAGES_EXT = ["4mm", "6mm", "SP10 (Anti-effraction)", "Granité"]
@@ -627,23 +733,24 @@ def render_node_ui(node, w_ref, h_ref, level=0, counter=None):
             else: # horizontal
                 render_node_ui(node['children'][0], w_ref, node['split_value'], level + 1, counter)
                 render_node_ui(node['children'][1], w_ref, h_ref - node['split_value'], level + 1, counter)
-def reset_config():
+def reset_config(rerun=True):
     # FIXED V73: Do NOT clear everything (keeps Project, Session, Selection)
     # Only clear config-related keys
     # V74: Preserve 'mode_module' to stay in current context
-    keys_keep = ['project', 'active_config_id', 'mgr_sel_id', 'uploader_json', 'mode_module']
-    keys_to_del = [k for k in st.session_state if k not in keys_keep]
+    # V75: REMOVE 'active_config_id'. Reset = New.
+    keys_keep = ['project', 'mgr_sel_id', 'uploader_json', 'mode_module']
+    
+    # SAFE ITERATION: list(keys)
+    keys_to_del = [k for k in list(st.session_state.keys()) if k not in keys_keep]
     for k in keys_to_del:
         del st.session_state[k]
     
     current_mode = st.session_state.get('mode_module', 'Menuiserie')
     
-    # Identification (Shared Keys)
-    if current_mode == 'Habillage':
-        st.session_state['ref_id'] = "H1"
-    else:
-        st.session_state['ref_id'] = "F1"
-        
+    # Default Values based on Mode
+    # GLOBAL HARMONIZATION: Always use next available Repère
+    st.session_state['ref_id'] = get_next_project_ref()
+    
     st.session_state['qte_val'] = 1
     
     # Menuiserie Defaults (Only set if in Menuiserie or General Reset? 
@@ -686,7 +793,21 @@ def reset_config():
     # FORCE RESET ROOT WIDGET (Fix persistence bug)
     st.session_state['root_lvl0_t'] = "Fixe"
     
-    st.rerun()
+    # HABILLAGE DEFAULTS (Explicit Reset to fix persistence)
+    # Default is Index 0 of PROFILES_DB -> "m1"
+    st.session_state['hab_model_selector'] = "m1"
+    st.session_state['hab_length_input'] = 3000
+    
+    # Explicitly reset dimensions for default model (m1) to force UI update
+    # even if widget key 'hab_m1_A' remains the same.
+    st.session_state['hab_m1_A'] = 100
+    
+    # Clear any previous 'hab_m1_A' etc ??
+    # Deletion loop above handles that.
+    
+    # Allow external control of rerun
+    if rerun:
+        st.rerun()
 
 
 
@@ -1807,9 +1928,25 @@ def render_habillage_form():
     config = {}
     
     # 0. Identification
-    with st.expander("1. Identification", expanded=True):
+    with st.expander("1. Repère et quantité", expanded=False):
         c_ref, c_qte = st.columns([3, 1])
-        ref_chantier = c_ref.text_input("Référence", value=st.session_state.get('ref_id', "Bavette F1"), key="ref_id")
+        # CHANGEMENT: Default Ref Repère 1
+        
+        # HANDLE PENDING REF UPDATE (Fix StreamlitAPIException)
+        if 'pending_ref_id' in st.session_state:
+            st.session_state['ref_id'] = st.session_state.pop('pending_ref_id')
+            
+        if 'pending_ref_id' in st.session_state:
+            st.session_state['ref_id'] = st.session_state.pop('pending_ref_id')
+            
+        base_ref = st.session_state.get('ref_id', get_next_project_ref())
+        # If user switched from Menuiserie to Habillage, logic handles it?
+        # The session state 'ref_id' is shared. 
+        # If current is "F1" (default Menuiserie) and we switch to Habillage, 
+        # we might want to propose "H1" if it looks like a default.
+        # NOW UNIFIED: Repère 1 for everyone.
+        
+        ref_chantier = c_ref.text_input("Référence", value=base_ref, key="ref_id")
         qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="qte_val")
         config["ref"] = ref_chantier
         config["qte"] = qte_piece
@@ -1818,8 +1955,10 @@ def render_habillage_form():
     profile_keys = list(PROFILES_DB.keys())
     model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
     
-    with st.expander("2. Modèle & Dimensions", expanded=True):
-        selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=2)
+    with st.expander("2. Modèle & Dimensions", expanded=False):
+        # CHANGEMENT: Index 0 (Modèle 1 Plat / Chant)
+        # Added explicit key to ensure reset clears it
+        selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=0, key="hab_model_selector")
         
         if selected_key == "m11":
             # CUSTOM BUILDER
@@ -1890,11 +2029,11 @@ def render_habillage_form():
                     val = st.number_input(label, value=int(defaults.get(p, 0)), step=int(step), key=f"hab_{selected_key}_{p}")
                     config[p] = val
                     
-        length = st.number_input("Longueur (mm)", value=3000, step=100, key="hab_len")
+        length = st.number_input("Longueur (mm)", value=3000, step=100, key="hab_length_input")
         config["length"] = length # Ensure key matches usage
 
     # 3. Finition
-    with st.expander("3. Finition", expanded=True):
+    with st.expander("3. Finition", expanded=False):
         # Type Finition choices
         type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
         type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
@@ -1954,24 +2093,65 @@ def render_habillage_form():
         config["epaisseur"] = epaisseur
         config["couleur"] = couleur
 
-        st.markdown("### 💾 Actions")
-        # Workflow Buttons
-        c_btn1, c_btn2 = st.columns(2)
+    # Finition END
+    
+    # --- MOVED ACTION BUTTONS HERE (Bottom of Form, Outside Expander) ---
+    # FIXED: REMOVED ROGUE MARKDOWN
+    # st.markdown("##    # --- ACTIONS ---")
+    st.markdown("### 💾 Actions")
+    
+    # 0. Show Edition Status
+    active_id = st.session_state.get('active_config_id')
+    if active_id:
+        # Check if active is Habillage?
+        # Yes, because we loaded it.
+        st.caption(f"✏️ Édition en cours : {st.session_state.get('ref_id', '???')}")
         
-        if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="hab_btn_add"):
-            data = serialize_config()
-            data['mode_module'] = 'Habillage'
-            new_ref = st.session_state.get('ref_id', 'H1')
-            add_config_to_project(data, new_ref)
-            st.toast(f"✅ {new_ref} ajouté !")
+    c_btn0, c_btn1, c_btn2 = st.columns(3)
+    
+    # ACTION: UPDATE (Only if active file)
+    if active_id:
+         if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
+             data = serialize_config()
+             data['mode_module'] = 'Habillage' # Ensure consistency
+             current_ref = st.session_state.get('ref_id', 'Repère 1')
+             
+             # Helper function in project_utils.py ? Or implemented here.
+             # Need to find 'update_current_config_in_project' in namespace.
+             # It is imported.
+             update_current_config_in_project(active_id, data, current_ref)
+             st.toast(f"✅ {current_ref} mis à jour !")
+             st.rerun()
+    
+    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="hab_btn_add"):
+        data = serialize_config()
+        data['mode_module'] = 'Habillage'
+        new_ref = st.session_state.get('ref_id', 'H1')
+        new_id = add_config_to_project(data, new_ref)
+        # Fix: Use pending_new_id to avoid "notify after instantiate" error
+        st.session_state['pending_new_id'] = new_id
+        # AUTO-INCREMENT REF
+        st.session_state['pending_ref_id'] = get_next_ref(new_ref)
+        st.toast(f"✅ {new_ref} ajouté !")
+        st.rerun()
 
-        if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="hab_btn_new"):
-            data = serialize_config()
-            data['mode_module'] = 'Habillage'
-            new_ref = st.session_state.get('ref_id', 'H1')
-            add_config_to_project(data, new_ref)
-            st.toast(f"✅ {new_ref} enregistré !")
-            reset_config()
+    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="hab_btn_new"):
+        data = serialize_config()
+        data['mode_module'] = 'Habillage'
+        new_ref = st.session_state.get('ref_id', 'Repère 1')
+        new_id = add_config_to_project(data, new_ref)
+        st.session_state['pending_new_id'] = new_id
+        st.toast(f"✅ {new_ref} enregistré !")
+        
+        st.toast(f"✅ {new_ref} enregistré !")
+        
+        # Reset but DO NOT RERUN yet
+        reset_config(rerun=False)
+        
+        # AUTO-INCREMENT REF (Now this code is reachable)
+        st.session_state['pending_ref_id'] = get_next_project_ref()
+        st.rerun()
+
 
     return {
         "key": selected_key,
@@ -1996,13 +2176,18 @@ def render_menuiserie_form():
     global is_appui_rap, largeur_appui, txt_partie_basse, zones_config, cfg_global
 
     # --- SECTION 1 : IDENTIFICATION ---
-    with st.expander("1. Identification", expanded=True):
+    with st.expander("1. Repère et quantité", expanded=False):
         c1, c2 = st.columns([3, 1])
-        rep = c1.text_input("Repère", st.session_state.get('ref_id', 'F1'), key="ref_id")
+        
+        # HANDLE PENDING REF UPDATE (Fix StreamlitAPIException)
+        if 'pending_ref_id' in st.session_state:
+            st.session_state['ref_id'] = st.session_state.pop('pending_ref_id')
+            
+        rep = c1.text_input("Repère", st.session_state.get('ref_id', get_next_project_ref()), key="ref_id")
         qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
 
     # --- SECTION 2 : MATERIAU ---
-    with st.expander("2. Matériau & Ailettes", expanded=True):
+    with st.expander("2. Matériau & Ailettes", expanded=False):
         mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
         if mat == "PVC":
@@ -2051,7 +2236,7 @@ def render_menuiserie_form():
         col_ext = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
 
     # --- SECTION 3 : DIMENSIONS ---
-    with st.expander("3. Dimensions & VR", expanded=True):
+    with st.expander("3. Dimensions & VR", expanded=False):
         c3, c4 = st.columns(2)
         
         # Libellé dynamique pour la Hauteur
@@ -2075,7 +2260,7 @@ def render_menuiserie_form():
             h_menuiserie = h_dos_dormant
 
     # --- SECTION 4 : STRUCTURE & FINITIONS ---
-    with st.expander("4. Structure & Finitions", expanded=True):
+    with st.expander("4. Structure & Finitions", expanded=False):
         # mode_structure = st.radio("Mode Structure", ["Simple (1 Zone)", "Divisée (2 Zones)"], horizontal=True, key="struct_mode", index=0)
         st.caption("Arbre de configuration (Diviser/Fusionner)")
 
@@ -2099,51 +2284,54 @@ def render_menuiserie_form():
             'color_frame': hex_col,
             'color_glass': "#d6eaff"
         }
-        
+     # --- ACTIONS ---
     st.markdown("### 💾 Actions")
-    # Workflow Buttons
-    c_btn1, c_btn2 = st.columns(2)
     
+    active_id = st.session_state.get('active_config_id')
+    if active_id:
+        st.caption(f"✏️ Édition en cours : {st.session_state.get('ref_id', '???')}")
+        
+    c_btn0, c_btn1, c_btn2 = st.columns(3)
+    
+    # ACTION: UPDATE (Menuiserie)
+    if active_id:
+        if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
+             data = serialize_config()
+             data['mode_module'] = 'Menuiserie'
+             current_ref = st.session_state.get('ref_id', 'Repère 1')
+             update_current_config_in_project(active_id, data, current_ref)
+             st.toast(f"✅ {current_ref} mis à jour !")
+             st.rerun()
+
     # 1. Ajouter et Dupliquer (Save as New, Keep Editing)
     if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, help="Enregistrer une copie"):
         data = serialize_config()
         # Ensure mode_module is saved
         data['mode_module'] = 'Menuiserie'
-        new_ref = st.session_state.get('ref_id', 'F1')
-        
-        # Check if we are editing an existing ID?
-        # User wants "Add" -> Create New.
-        # Logic: Save current input as NEW entry.
-        # Find unique name? 1, 2...
+        new_ref = st.session_state.get('ref_id', 'Repère 1')
         
         new_id = add_config_to_project(data, new_ref)
-        
-        # Keep editing this new ID? Or keep as Unsaved?
-        # "Dupliquer" implies we keep the data to make another one.
-        # Let's set active ID to this new one so user modifies IT, or set to None?
-        # "Ajouter" puts it in the list.
-        # If I want to make F1, then F2 (similar):
-        # I click "Add & Dup". F1 is saved. Screen still has F1 data.
-        # I change Ref to F2.
-        # I click "Add & Dup". F2 is saved. Screen still has F2 data.
-        
-        # So we just Add to Project and stay "Unsaved" (active_id = None) or switch to it?
-        # If we switch to it, modifying it updates it (if we use the Save button).
-        # But here we are in "Add" workflow.
-        # Let's just Save it and Notify.
+        st.session_state['pending_new_id'] = new_id # Fix error
+        # AUTO-INCREMENT REF
+        st.session_state['pending_ref_id'] = get_next_ref(new_ref)
         st.toast(f"✅ {new_ref} ajouté à la liste !")
+        st.rerun()
         
     # 2. Ajouter et Nouveau (Save as New, Reset)
     if c_btn2.button("Ajouter & Nouveau", use_container_width=True):
         data = serialize_config()
         data['mode_module'] = 'Menuiserie'
-        new_ref = st.session_state.get('ref_id', 'F1')
+        new_ref = st.session_state.get('ref_id', 'Repère 1')
         
-        add_config_to_project(data, new_ref)
+        new_id = add_config_to_project(data, new_ref)
+        st.session_state['pending_new_id'] = new_id
         st.toast(f"✅ {new_ref} enregistré !")
         
-        # RESET
-        reset_config() # Will rerun
+        # RESET (No Rerun)
+        reset_config(rerun=False) 
+        # AUTO-INCREMENT REF
+        st.session_state['pending_ref_id'] = get_next_project_ref()
+        st.rerun()
     
 
 
@@ -2384,6 +2572,10 @@ current_mode = st.session_state.get('mode_module', 'Menuiserie')
 
 # --- COLUMN LEFT: CONFIGURATION ---
 with c_config:
+    # BOUTON RESET (RESTAURÉ)
+    if st.button("❌ Réinitialiser", use_container_width=True, help="Remettre à zéro le formulaire"):
+        reset_config()
+        
     if current_mode == 'Menuiserie':
         st.markdown("### 🛠 Options Menuiserie")
         render_menuiserie_form()
