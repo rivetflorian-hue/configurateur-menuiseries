@@ -1621,28 +1621,49 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     w_shape = max_x - min_x
     h_shape = max_y - min_y
     
-    # Scale to fill 30% of SVG but WITH SENSITIVITY
-    target_size = 250
+    # Scale to fill portion of SVG (Zoom In)
+    target_size = 350 
     
-    # SCALING FIX: Minimum divisor 300
-    ref_dim = max(w_shape, h_shape, 300) 
+    # SCALING FIX: Increase minimum divisor to 250 to allow "growth" perception 
+    # for small items (100->250mm). Items > 250mm will be fitted to target_size.
+    ref_dim = max(w_shape, h_shape, 250) 
     scale = target_size / ref_dim
         
-    # Project 2D Profile (Front Face)
-    ox, oy = 250, 300 # Centerish
-    
+    # 1. Calculate Scaled Points relative to (0,0) first
+    # min_x, min_y are the top-left of the shape in logical coords
     scaled_points = []
     for p in points:
-        nx = ox + (p[0] - min_x) * scale
-        ny = oy + (p[1] - min_y) * scale
+        nx = (p[0] - min_x) * scale
+        ny = (p[1] - min_y) * scale
         scaled_points.append((nx, ny))
         
-    # Create Back Face (Depth)
-    depth_x, depth_y = 150, -80
+    # 2. Create Back Face (Depth)
+    # Increase Depth Vector to look "long enough" even when zoomed
+    # Maybe proportional? No, fixed but larger looks better for "Profile Visual"
+    depth_x, depth_y = 200, -100 # Increased from 150,-80
     back_points = []
     for p in scaled_points:
         back_points.append((p[0] + depth_x, p[1] + depth_y))
         
+    # 3. AUTO-CENTERING
+    # Collect all visual points
+    all_x = [p[0] for p in scaled_points] + [p[0] for p in back_points]
+    all_y = [p[1] for p in scaled_points] + [p[1] for p in back_points]
+    
+    min_gx, max_gx = min(all_x), max(all_x)
+    min_gy, max_gy = min(all_y), max(all_y)
+    
+    w_draw = max_gx - min_gx
+    h_draw = max_gy - min_gy
+    
+    # Center in 700x500
+    offset_x = (700 - w_draw) / 2 - min_gx
+    offset_y = (500 - h_draw) / 2 - min_gy
+    
+    # Apply Offset
+    scaled_points = [(p[0] + offset_x, p[1] + offset_y) for p in scaled_points]
+    back_points = [(p[0] + offset_x, p[1] + offset_y) for p in back_points]
+    
     # DRAW SVG
     svg_els = []
     style_line = f'stroke="black" stroke-width="2" fill="none"'
@@ -1657,7 +1678,7 @@ def generate_profile_svg(type_p, inputs, length, color_name):
         p_back = back_points[0]
         t = 0.8
         lbl_x = p_front[0] + (p_back[0] - p_front[0]) * t
-        lbl_y = p_front[1] + (p_back[1] - p_front[1]) * t - 15
+        lbl_y = p_front[1] + (p_back[1] - p_front[1]) * t - 40 
         svg_els.append(f'<text x="{lbl_x}" y="{lbl_y}" font-family="Arial" font-size="14" fill="#335c85" font-weight="bold" text-anchor="middle">L={length}</text>')
         
     path_front = "M " + " L ".join([f"{p[0]},{p[1]}" for p in scaled_points])
@@ -1690,8 +1711,8 @@ def generate_profile_svg(type_p, inputs, length, color_name):
         if dot < 0:
             nx = -nx; ny = -ny
             
-        # Offset "Close" (User request)
-        offset = 10
+        # Offset "Close" (User request: very close)
+        offset = 4 # Reduced from 10
         
         lx = mx + nx*offset; ly = my + ny*offset
         
@@ -1730,8 +1751,8 @@ def generate_profile_svg(type_p, inputs, length, color_name):
         if l==0: l=1
         nx=dy/l; ny=-dx/l
         
-        f1_dist=70; f1_x=mx+nx*f1_dist; f1_y=my+ny*f1_dist
-        f2_dist=40; f2_x=mx-nx*f2_dist; f2_y=my-ny*f2_dist
+        f1_dist=130; f1_x=mx+nx*f1_dist; f1_y=my+ny*f1_dist # Face 2 (Top) - Further (90->130)
+        f2_dist=90; f2_x=mx-nx*f2_dist; f2_y=my-ny*f2_dist # Face 1 (Bottom) - Further (60->90)
         style='font-family="Arial" font-size="12" fill="#666" font-style="italic" text-anchor="middle" dominant-baseline="middle"'
         svg_els.append(f'<text x="{f1_x}" y="{f1_y}" {style}>FACE 2</text>')
         svg_els.append(f'<text x="{f2_x}" y="{f2_y}" {style}>FACE 1</text>')
