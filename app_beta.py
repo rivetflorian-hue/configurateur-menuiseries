@@ -191,170 +191,119 @@ def delete_config_from_project(config_id):
         c for c in st.session_state['project']['configs'] if c['id'] != config_id
     ]
 
-def render_project_sidebar():
-    """Affiche l'interface de gestion de projet dans la sidebar (Refonte V73)."""
-    st.sidebar.markdown("### 📁 Projet")
+def render_top_navigation():
+    """Affiche la navigation supérieure (Projet, Mode, Liste)."""
     
-    # 1. Nom du Projet
-    proj_name = st.sidebar.text_input("Nom du Chantier", st.session_state['project']['name'])
-    if proj_name != st.session_state['project']['name']:
-        st.session_state['project']['name'] = proj_name
-        
-    configs = st.session_state['project']['configs']
+    # 1. Ligne Supérieure : Nom Projet & Imports
+    c_proj, c_imp = st.columns([3, 1])
     
-    # Initialize active_id and active_ref safe default
-    active_id = None
-    active_ref = "Nouveau"
-    
-    # Selection State Logic
-    if not configs:
-        st.sidebar.warning("Aucune configuration.")
-        options = {}
-    else:
-        # --- GESTION ÉTAT ACTIF (ACTIVE CONFIG ID) ---
-        if 'active_config_id' not in st.session_state:
-            # Try to find if current data matches a saved config? Difficile.
-            # Assume None / Unsaved Mode initially or match first if identical?
-            # Let's start with None (Mode "Sans Titre")
-            st.session_state['active_config_id'] = None
-
-        # Determine Active Ref Name
-        active_id = st.session_state['active_config_id']
-        active_ref = "Non enregistré"
-        active_color = "red"
-        
-        if active_id:
-            # Find ref
-            found = next((c for c in configs if c['id'] == active_id), None)
-            if found:
-                active_ref = found['ref']
-                active_color = "green"
-            else:
-                # ID deleted OR Mismatch?
-                # DEBUG MODE: Do NOT reset automatically to see what happened
-                # st.session_state['active_config_id'] = None 
-                active_ref = f"ORPHELIN ({active_id})"
-                active_color = "orange"
-
-        st.sidebar.markdown(f"**Fichier Actif :** :{active_color}[{active_ref}]")
-        # st.sidebar.caption(f"Debug: ActiveID={active_id}, Found={active_id and any(c['id'] == active_id for c in configs)}")
-
-        # Create Options Map
-        options = {c['id']: f"{c['ref']} (ID: {c['id'][:4]})" for c in configs}
-        
-        # Ensure ID is valid (optional but safe)
-        if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
-             st.session_state['mgr_sel_id'] = configs[0]['id']
-    c_save, c_new = st.sidebar.columns(2)
-    
-    # SAUVEGARDER (Target: ACTIVE ID ONLY)
-    # Check if active_id physically exists in the current list
-    id_exists = False
-    if active_id and configs:
-        id_exists = any(c['id'] == active_id for c in configs)
-    
-    lbl_save = f"💾 Mettre à jour '{active_ref}'" if id_exists else "💾 Enreg. Nouveau"
-    
-    # Visual Warning if Selection != Active
-    sel_id = st.session_state.get('mgr_sel_id')
-    if active_id and sel_id and active_id != sel_id:
-        st.sidebar.warning(f"⚠️ **Attention** : Vous éditez **{active_ref}**, mais **{options.get(sel_id, 'Inconnu')}** est sélectionné dans la liste.")
-        st.sidebar.caption("Cliquez sur 'Ouvrir' pour changer de fichier.")
-    
-    if c_save.button(lbl_save, help=f"Enregistrer modifications sur '{active_ref}'", use_container_width=True):
-        current_data = serialize_config()
-        current_ref = st.session_state.get('ref_id', 'Sans Ref')
-        
-        if id_exists:
-            # UPDATE EXISTING
-            if update_current_config_in_project(active_id, current_data, current_ref):
-                 st.toast(f"✅ Fichier '{current_ref}' mis à jour !")
-            else:
-                 st.error("Erreur critique: ID introuvable malgré vérification.")
-        else:
-            # CREATE NEW (Because ID doesn't exist or is None)
-            cnt = len(configs) + 1
-            if current_ref == 'Sans Ref': current_ref = f"Fenêtre {cnt}"
-            new_id = add_config_to_project(current_data, current_ref)
-            st.session_state['active_config_id'] = new_id
-            st.toast(f"🆕 Nouveau fichier '{current_ref}' créé !")
-            st.rerun() # Refresh to show green status
-        
-    # NOUVELLE CONFIGURATION
-    if c_new.button("➕ Nouveau", help="Vider l'écran pour une nouvelle fenêtre", use_container_width=True):
-        # We want to clear screen but NOT necessarily save immediately?
-        # Or just "Clone current as new"? 
-        # User expectation: "New" = Blank Canvas usually.
-        # But here valid config is required.
-        # Let's create a NEW entry based on Default/Current and make it active.
-        current_data = serialize_config() # Copy current settings as base
-        cnt = len(configs) + 1
-        new_id = add_config_to_project(current_data, f"Fenêtre {cnt}")
-        st.session_state['active_config_id'] = new_id
-        st.toast(f"Nouvelle fenêtre {cnt} créée !")
-        st.rerun()
-
-    st.sidebar.markdown("---")
-    
-    # 3. LISTE & CHARGEMENT
-    if configs:
-        st.sidebar.caption("Ouvrir une autre configuration :")
-        
-        # BIND DIRECTLY TO mgr_sel_id for LIST selection
-        sel_id = st.sidebar.selectbox(
-            "Liste", 
-            options.keys(), 
-            format_func=lambda x: options[x], 
-            key='mgr_sel_id', # SYNCED with list state
-            label_visibility="collapsed"
-        )
-        
-        c_load, c_del = st.sidebar.columns([2, 1])
-        
-        # CHARGER : SWITCH ACTIVE ID
-        if c_load.button("📂 Ouvrir", use_container_width=True):
-            target = next((c for c in configs if c['id'] == sel_id), None)
-            if target:
-                deserialize_config(target['data'])
-                # SET ACTIVE ID
-                st.session_state['active_config_id'] = target['id']
-                # SYNC SELECTION (Redundant & Causes API Error)
-                # st.session_state['mgr_sel_id'] = target['id'] 
-                st.toast(f"Ouverture de '{target['ref']}'...")
-                st.rerun()
-                
-        if c_del.button("🗑", help="Supprimer", use_container_width=True):
-            delete_config_from_project(sel_id)
-            # If we deleted the active one, reset active
-            if st.session_state.get('active_config_id') == sel_id:
-                st.session_state['active_config_id'] = None
-            st.rerun()
+    with c_proj:
+        # Style 'Title' for Project Name
+        proj_name = st.text_input("Nom du Chantier", st.session_state['project']['name'], key="proj_name_top")
+        if proj_name != st.session_state['project']['name']:
+            st.session_state['project']['name'] = proj_name
             
-    # 4. EXPORT / IMPORT (Discret en bas)
-    with st.sidebar.expander("Import / Export JSON"):
-        proj_data = json.dumps(st.session_state['project'], indent=2)
-        
-        # Dynamic Filename based on Project Name
-        raw_name = st.session_state['project'].get('name', 'Projet_Fenetre')
-        safe_name = "".join([c if c.isalnum() else "_" for c in raw_name])
-        dl_name = f"{safe_name}.json"
-        
-        st.download_button("Export (JSON)", proj_data, file_name=dl_name, mime="application/json")
-        
-        # Manual Import Trigger (Safer)
-        uploaded = st.file_uploader("Import JSON", type=['json'], key='uploader_json')
-        if uploaded:
-            if st.button("📥 Charger le Projet", help="Ecrase le projet actuel avec le fichier"):
+    with c_imp:
+        with st.popover("⚙️ Options"):
+            st.markdown("### Import / Export")
+            proj_data = json.dumps(st.session_state['project'], indent=2)
+            raw_name = st.session_state['project'].get('name', 'Projet_Fenetre')
+            safe_name = "".join([c if c.isalnum() else "_" for c in raw_name])
+            dl_name = f"{safe_name}.json"
+            
+            st.download_button("Export (JSON)", proj_data, file_name=dl_name, mime="application/json")
+            
+            uploaded = st.file_uploader("Import JSON", type=['json'], key='uploader_json')
+            if uploaded and st.button("📥 Charger le Projet"):
                  try:
                     data = json.load(uploaded)
                     if 'configs' in data:
                         st.session_state['project'] = data
-                        # Reset active ID to avoid conflicts
                         st.session_state['active_config_id'] = None
                         st.toast("Projet importé avec succès !")
                         st.rerun()
                  except Exception as e:
-                    st.error(f"Erreur lors de l'import : {e}")
+                    st.error(f"Erreur : {e}")
+
+    st.markdown("---")
+    
+    # 2. Ligne Navigation : Mode & Liste Configs
+    c_mode, c_list = st.columns([1, 2])
+    
+    with c_mode:
+        # MODE SWITCH
+        nav_options = ["Menuiserie", "Habillage"]
+        current_mode = st.session_state.get('mode_module', 'Menuiserie')
+        
+        # Ensure valid
+        if current_mode not in nav_options: current_mode = "Menuiserie"
+        
+        user_mode = st.radio("Module", nav_options, index=nav_options.index(current_mode), horizontal=True, label_visibility="collapsed", key="nav_mode_top")
+        
+        if user_mode != current_mode:
+            st.session_state['mode_module'] = user_mode
+            st.rerun()
+            
+    with c_list:
+        configs = st.session_state['project']['configs']
+        
+        # Filter configs by mode? User says "Si menuiserie cochée... liste menuiserie".
+        # We need 'config_type' in data. 
+        # Existing configs might not have it. Default to 'Menuiserie'.
+        # We'll filter the dropdown.
+        
+        filtered_configs = []
+        for c in configs:
+            c_type = c['data'].get('mode_module', 'Menuiserie')
+            if c_type == st.session_state['mode_module']:
+                filtered_configs.append(c)
+        
+        if not filtered_configs:
+            # st.caption(f"Aucune config {st.session_state['mode_module']}")
+            options = {}
+        else:
+            options = {c['id']: f"{c['ref']}" for c in filtered_configs}
+            
+        # Selectbox for OPENING
+        # We use a placeholder "Sélectionner..." to allow re-selecting same item?
+        # Or just standard selectbox.
+        
+        if options:
+            if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
+                st.session_state['mgr_sel_id'] = list(options.keys())[0]
+                
+            c_l_sel, c_l_act = st.columns([3, 1])
+            sel_id = c_l_sel.selectbox(
+                "Configurations Enregistrées", 
+                options.keys(), 
+                format_func=lambda x: options[x], 
+                key='mgr_sel_id', 
+                label_visibility="collapsed"
+            )
+            
+            with c_l_act:
+                 if st.button("📂 Ouvrir", use_container_width=True):
+                    target = next((c for c in configs if c['id'] == sel_id), None)
+                    if target:
+                        deserialize_config(target['data'])
+                        st.session_state['active_config_id'] = target['id']
+                        st.session_state['ref_id'] = target['ref'] # Sync Name
+                        st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie') # Sync Mode
+                        st.toast(f"Ouverture de '{target['ref']}'...")
+                        st.rerun()
+                        
+                 # Supprimer logic could be in a popover or next to it.
+                 # Let's keep it simple for now. 
+                 
+    # 3. Active Status Bar
+    active_id = st.session_state.get('active_config_id')
+    active_ref = st.session_state.get('ref_id', 'Nouveau')
+    
+    if active_id:
+        st.caption(f"✏️ **Édition en cours :** {active_ref} (Enregistré)")
+    else:
+        st.caption(f"✨ **Nouveau fichier :** {active_ref} (Non enregistré)")
+
 
 def generate_html_report(project_name, config_ref, svg_content, data_dict):
     """Génère un rapport HTML complet prêt à l'impression."""
@@ -427,12 +376,6 @@ st.markdown("""
     .main { background-color: #f5f7f9; }
     h1, h2, h3, h4 { color: #2c3e50; }
     .stApp { max-width: 100%; }
-    
-    /* FORCE LA LARGEUR DE LA SIDEBAR */
-    section[data-testid="stSidebar"] {
-        width: 35% !important; /* Environ 1/3 de l'écran */
-        min-width: 450px !important; /* Largeur minimum confortable */
-    }
     
     div.row-widget.stRadio > div { flex-direction: row; }
     .metric-box {
@@ -687,14 +630,25 @@ def render_node_ui(node, w_ref, h_ref, level=0, counter=None):
 def reset_config():
     # FIXED V73: Do NOT clear everything (keeps Project, Session, Selection)
     # Only clear config-related keys
-    keys_keep = ['project', 'active_config_id', 'mgr_sel_id', 'uploader_json']
+    # V74: Preserve 'mode_module' to stay in current context
+    keys_keep = ['project', 'active_config_id', 'mgr_sel_id', 'uploader_json', 'mode_module']
     keys_to_del = [k for k in st.session_state if k not in keys_keep]
     for k in keys_to_del:
         del st.session_state[k]
     
-    # Identification
-    st.session_state['ref_id'] = "F1"
+    current_mode = st.session_state.get('mode_module', 'Menuiserie')
+    
+    # Identification (Shared Keys)
+    if current_mode == 'Habillage':
+        st.session_state['ref_id'] = "H1"
+    else:
+        st.session_state['ref_id'] = "F1"
+        
     st.session_state['qte_val'] = 1
+    
+    # Menuiserie Defaults (Only set if in Menuiserie or General Reset? 
+    # Setting them is harmless as they are keys used only by Menuiserie widgets usually,
+    # except ref/qte which are shared).
     
     # Matériau & Pose
     st.session_state['mat_type'] = "PVC"
@@ -703,10 +657,6 @@ def reset_config():
     st.session_state['pose_type'] = "Pose en rénovation (R)" # Default for Reno
     
     # Ailettes / Seuil
-    # PVC defaults: indices match logic in UI (60 for side, 0 for bottom)
-    # We let the widgets pick defaults based on index, but clearing SS works for 'index'.
-    # However, forcing keys is safer.
-    # Note: selectbox stores the VALUE string, not index.
     st.session_state['fin_val'] = 60 # Standard PVC 60
     st.session_state['same_bot'] = False
     st.session_state['fin_bot'] = 0
@@ -1852,17 +1802,15 @@ def render_habillage_main_ui(cfg):
         """
         st.download_button("📄 Imprimer (PDF)", html_report, f"fiche_{cfg['ref']}.html", "text/html", use_container_width=True)
 
-def render_habillage_sidebar_ui():
+def render_habillage_form():
     """Renders the Sidebar inputs for Habillage and returns the config dict."""
     config = {}
     
-    st.sidebar.markdown("### 🛠 Options Habillage")
-    
     # 0. Identification
-    with st.sidebar.expander("1. Identification", expanded=False):
-        c_ref, c_qte = st.columns([2, 1])
-        ref_chantier = c_ref.text_input("Référence", value=st.session_state.get('ref_id', "Bavette F1"), key="hab_ref")
-        qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="hab_qte")
+    with st.expander("1. Identification", expanded=True):
+        c_ref, c_qte = st.columns([3, 1])
+        ref_chantier = c_ref.text_input("Référence", value=st.session_state.get('ref_id', "Bavette F1"), key="ref_id")
+        qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="qte_val")
         config["ref"] = ref_chantier
         config["qte"] = qte_piece
 
@@ -1870,7 +1818,7 @@ def render_habillage_sidebar_ui():
     profile_keys = list(PROFILES_DB.keys())
     model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
     
-    with st.sidebar.expander("2. Modèle & Dimensions", expanded=True):
+    with st.expander("2. Modèle & Dimensions", expanded=True):
         selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=2)
         
         if selected_key == "m11":
@@ -1946,7 +1894,7 @@ def render_habillage_sidebar_ui():
         config["length"] = length # Ensure key matches usage
 
     # 3. Finition
-    with st.sidebar.expander("3. Finition", expanded=False):
+    with st.expander("3. Finition", expanded=True):
         # Type Finition choices
         type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
         type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
@@ -1998,9 +1946,6 @@ def render_habillage_sidebar_ui():
                  
         elif "Prélaqué 2 faces" == type_finition:
              # Usually standard colors both sides or diff?
-             # Let's assume user picks one color for both or distinct?
-             # Industry standard: often same color or specific pairs.
-             # Let's offer generic choice.
              st.markdown("**Face 1 & 2**")
              couleur_st = st.selectbox("Couleur", colors_list, index=0, key="col_prelaq2")
              couleur = f"{couleur_st} (2 faces)"
@@ -2008,6 +1953,25 @@ def render_habillage_sidebar_ui():
         config["finition"] = type_finition
         config["epaisseur"] = epaisseur
         config["couleur"] = couleur
+
+        st.markdown("### 💾 Actions")
+        # Workflow Buttons
+        c_btn1, c_btn2 = st.columns(2)
+        
+        if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="hab_btn_add"):
+            data = serialize_config()
+            data['mode_module'] = 'Habillage'
+            new_ref = st.session_state.get('ref_id', 'H1')
+            add_config_to_project(data, new_ref)
+            st.toast(f"✅ {new_ref} ajouté !")
+
+        if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="hab_btn_new"):
+            data = serialize_config()
+            data['mode_module'] = 'Habillage'
+            new_ref = st.session_state.get('ref_id', 'H1')
+            add_config_to_project(data, new_ref)
+            st.toast(f"✅ {new_ref} enregistré !")
+            reset_config()
 
     return {
         "key": selected_key,
@@ -2024,31 +1988,21 @@ def render_habillage_sidebar_ui():
 
 
 
-# --- 2. INTERFACE SIDEBAR ---
-# --- 2. INTERFACE SIDEBAR ---
-# GESTION DE PROJET (V73)
-render_project_sidebar()
 
-st.sidebar.title("🛠️ Configuration")
 
-# MENU NAVIGATION RETIRÉ (Retour aux expanders standards)
-
-if st.sidebar.button("❌ Réinitialiser la configuration", key="btn_reset"):
-    reset_config()
-
-def render_menuiserie_sidebar_global():
+def render_menuiserie_form():
     global rep, qte, mat, ep_dormant, type_projet, type_pose, ail_val, ail_bas, col_int, col_ext
     global l_dos_dormant, h_dos_dormant, h_allege, vr_opt, h_vr, vr_grille, h_menuiserie
     global is_appui_rap, largeur_appui, txt_partie_basse, zones_config, cfg_global
 
     # --- SECTION 1 : IDENTIFICATION ---
-    with st.sidebar.expander("1. Identification", expanded=False):
-        c1, c2 = st.columns(2)
-        rep = c1.text_input("Repère", "F1", key="ref_id")
+    with st.expander("1. Identification", expanded=True):
+        c1, c2 = st.columns([3, 1])
+        rep = c1.text_input("Repère", st.session_state.get('ref_id', 'F1'), key="ref_id")
         qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
 
     # --- SECTION 2 : MATERIAU ---
-    with st.sidebar.expander("2. Matériau & Ailettes", expanded=False):
+    with st.expander("2. Matériau & Ailettes", expanded=True):
         mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
         if mat == "PVC":
@@ -2074,9 +2028,10 @@ def render_menuiserie_sidebar_global():
         type_pose = st.selectbox("Type de Pose", liste_pose, key="pose_type")
 
         st.write("---")
-        ail_val = st.selectbox(f"Ailettes H/G/D ({mat})", liste_ailettes_std, index=len(liste_ailettes_std)-1, key="fin_val")
-        bas_identique = st.checkbox("Seuil (Bas) identique ?", False, key="same_bot")
-        ail_bas = ail_val if bas_identique else st.selectbox(f"Seuil / Bas ({mat})", liste_ailettes_std, index=0, key="fin_bot")
+        c_ail1, c_ail2 = st.columns(2)
+        ail_val = c_ail1.selectbox(f"Ailettes H/G/D", liste_ailettes_std, index=len(liste_ailettes_std)-1, key="fin_val")
+        bas_identique = c_ail2.checkbox("Seuil idem ?", False, key="same_bot")
+        ail_bas = ail_val if bas_identique else c_ail2.selectbox(f"Seuil / Bas", liste_ailettes_std, index=0, key="fin_bot")
 
         # CONFIG PARTIE BASSE (Seuil)
         st.write("---")
@@ -2091,37 +2046,38 @@ def render_menuiserie_sidebar_global():
             st.caption("Défaut : Bavette 100x100 mm")
 
         st.write("---")
-        col_int = st.selectbox("Couleur Int", liste_couleurs, key="col_in")
-        col_ext = st.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
+        cc1, cc2 = st.columns(2)
+        col_int = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in")
+        col_ext = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
 
     # --- SECTION 3 : DIMENSIONS ---
-    with st.sidebar.expander("3. Dimensions & VR", expanded=False):
+    with st.expander("3. Dimensions & VR", expanded=True):
         c3, c4 = st.columns(2)
         
         # Libellé dynamique pour la Hauteur
-        lbl_hauteur = "Hauteur dessus rejingo" if is_appui_rap else "Hauteur Dos Dormant (mm)"
+        lbl_hauteur = "Hauteur Rejingo" if is_appui_rap else "H. Dos Dormant"
         
-        l_dos_dormant = c3.number_input("Largeur Dos Dormant (mm)", 300, 5000, 1200, 10, key="width_dorm")
+        l_dos_dormant = c3.number_input("L. Dos Dormant", 300, 5000, 1200, 10, key="width_dorm")
         h_dos_dormant = c4.number_input(lbl_hauteur, 300, 5000, 1400, 10, help="Hauteur totale incluant le coffre", key="height_dorm")
         
         # Hauteur d'Allège
-        h_allege = st.number_input("Hauteur d'Allège (mm)", 0, 2500, 900, step=10, key="h_allege")
+        h_allege = st.number_input("Hauteur Allège", 0, 2500, 900, step=10, key="h_allege")
 
         vr_opt = st.toggle("Volet Roulant", False, key="vr_enable")
         h_vr = 0
         vr_grille = False
         if vr_opt:
             h_vr = st.number_input("Hauteur Coffre", 0, 500, 185, 10, key="vr_h")
-            vr_grille = st.checkbox("Grille d'aération sur Coffre ?", key="vr_g")
+            vr_grille = st.checkbox("Grille d'aération ?", key="vr_g")
             h_menuiserie = h_dos_dormant - h_vr
-            st.markdown(f"""<div class="metric-box">🧮 H. Menuiserie : {int(h_menuiserie)} mm</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div style='background:#e8f4f8; padding:5px; border-radius:4px; font-weight:bold; color:#2c3e50; text-align:center;'>🧮 H. Menuiserie : {int(h_menuiserie)} mm</div>""", unsafe_allow_html=True)
         else:
             h_menuiserie = h_dos_dormant
 
     # --- SECTION 4 : STRUCTURE & FINITIONS ---
-    with st.sidebar.expander("4. Structure & Finitions", expanded=False):
+    with st.expander("4. Structure & Finitions", expanded=True):
         # mode_structure = st.radio("Mode Structure", ["Simple (1 Zone)", "Divisée (2 Zones)"], horizontal=True, key="struct_mode", index=0)
-        st.caption("Configurez les zones ci-dessous (Cochez 'Diviser' pour séparer)")
+        st.caption("Arbre de configuration (Diviser/Fusionner)")
 
         # Initialisation de l'arbre si absent
         if 'zone_tree' not in st.session_state:
@@ -2143,21 +2099,51 @@ def render_menuiserie_sidebar_global():
             'color_frame': hex_col,
             'color_glass': "#d6eaff"
         }
-
-# --- NAVIGATION LOGIC (INSERTED AFTER DEFINITIONS) ---
-st.sidebar.markdown("---")
-# Use segmented control for cleaner look if available, else radio
-nav_options = ["Menuiserie", "Habillage"]
-nav_mode = st.sidebar.radio("Module", nav_options, horizontal=True, label_visibility="collapsed")
-
-hab_config = None
-
-if nav_mode == "Menuiserie":
-    st.sidebar.title("🛠️ Configuration")
-    render_menuiserie_sidebar_global()
-else:
-    st.sidebar.title("🧱 Configuration")
-    hab_config = render_habillage_sidebar_ui()
+        
+    st.markdown("### 💾 Actions")
+    # Workflow Buttons
+    c_btn1, c_btn2 = st.columns(2)
+    
+    # 1. Ajouter et Dupliquer (Save as New, Keep Editing)
+    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, help="Enregistrer une copie"):
+        data = serialize_config()
+        # Ensure mode_module is saved
+        data['mode_module'] = 'Menuiserie'
+        new_ref = st.session_state.get('ref_id', 'F1')
+        
+        # Check if we are editing an existing ID?
+        # User wants "Add" -> Create New.
+        # Logic: Save current input as NEW entry.
+        # Find unique name? 1, 2...
+        
+        new_id = add_config_to_project(data, new_ref)
+        
+        # Keep editing this new ID? Or keep as Unsaved?
+        # "Dupliquer" implies we keep the data to make another one.
+        # Let's set active ID to this new one so user modifies IT, or set to None?
+        # "Ajouter" puts it in the list.
+        # If I want to make F1, then F2 (similar):
+        # I click "Add & Dup". F1 is saved. Screen still has F1 data.
+        # I change Ref to F2.
+        # I click "Add & Dup". F2 is saved. Screen still has F2 data.
+        
+        # So we just Add to Project and stay "Unsaved" (active_id = None) or switch to it?
+        # If we switch to it, modifying it updates it (if we use the Save button).
+        # But here we are in "Add" workflow.
+        # Let's just Save it and Notify.
+        st.toast(f"✅ {new_ref} ajouté à la liste !")
+        
+    # 2. Ajouter et Nouveau (Save as New, Reset)
+    if c_btn2.button("Ajouter & Nouveau", use_container_width=True):
+        data = serialize_config()
+        data['mode_module'] = 'Menuiserie'
+        new_ref = st.session_state.get('ref_id', 'F1')
+        
+        add_config_to_project(data, new_ref)
+        st.toast(f"✅ {new_ref} enregistré !")
+        
+        # RESET
+        reset_config() # Will rerun
     
 
 
@@ -2383,241 +2369,141 @@ def generate_svg_v73():
 
 
 
-# --- RENDU FINAL (NOUVELLE MISE EN PAGE V72) ---
 
-# --- TABS ---
-# 1. Menuiserie (Existant)
-# 2. Habillage (Nouveau)
+# --- MAIN LAYOUT V3 (Responsive Columns) ---
 
-# --- NAVIGATION SWITCH (V74) replaced Tabs ---
-if nav_mode == "Menuiserie":
-    # 1. TITRE ET DESSIN CENTRÉS
-    st.markdown("<h2 class='centered-header'>Plan Technique</h2>", unsafe_allow_html=True)
+# 1. Top Navigation & Project Management
+render_top_navigation()
 
-    try:
-        svg_output = generate_svg_v73()
-        st.markdown(f"<div class='centered-svg'>{svg_output}</div>", unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"Erreur SVG: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+# 2. Main Content Columns (Desktop: Config Left / Preview Right)
+# Mobile: Stacked automatically due to Streamlit columns behavior
+c_config, c_preview = st.columns([1, 1.3])
 
-    # 2. RÉCAPITULATIF (SOUS LE DESSIN)
-    st.markdown("---")
-    st.markdown("<h3 class='centered-header'>Récapitulatif - Bon de Commande</h3>", unsafe_allow_html=True)
+hab_config = None
+current_mode = st.session_state.get('mode_module', 'Menuiserie')
 
-    # PREPARE ZONES DATA (Before Columns)
-    config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
-    sorted_zones = sorted(config_display, key=lambda z: z['id'])
+# --- COLUMN LEFT: CONFIGURATION ---
+with c_config:
+    if current_mode == 'Menuiserie':
+        st.markdown("### 🛠 Options Menuiserie")
+        render_menuiserie_form()
+    else:
+        st.markdown("### 🧱 Options Habillage")
+        hab_config = render_habillage_form()
 
-    c_recap_left, c_recap_right = st.columns([1, 1])
-
-    with c_recap_left:
-        st.subheader("Informations Générales")
-        
-        # Safe Access to Keys
-        s = st.session_state
-        
-        # Partie Basse Logic reconstruction
-        if s.get('is_appui_rap', False):
-            pb_txt = f"Appui Rapporté (Largeur {s.get('width_appui', 0)}mm)"
-        else:
-            pb_txt = "Bavette 100x100 mm"
-            
-        # VR Logic
-        vr_txt = "Oui" if s.get('vr_enable', False) else "Non"
-        
-        # Ailettes Logic (From fin_val / fin_bot)
-        h_ail = s.get('fin_val', 0)
-        b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
-        # Assuming H/G/D are same 'fin_val'
-        ailes_txt = f"H:{h_ail}/G:{h_ail}/D:{h_ail}/B:{b_ail}"
-
-        # Nb Zones calculation
-        # We can't access 'zones_config' easily here as it's local to Sidebar context.
-        # But we can check 'zone_tree'
+# --- COLUMN RIGHT: VISUALISATION ---
+with c_preview:
+    st.markdown("### 👁️ Visualisation")
+    
+    if current_mode == 'Menuiserie':
+        # 1. PLAN TECHNIQUE
         try:
-            nb_zones = len(flatten_tree(s.get('zone_tree'), 0,0,0,0))
-        except: nb_zones = 1
+            svg_output = generate_svg_v73()
+            # Use container width for SVG
+            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Erreur SVG: {e}")
+            import traceback
+            st.code(traceback.format_exc())
 
-        df_infos = pd.DataFrame({
-            "value": [
-                s.get('ref_id', 'F1'),
-                s.get('qte_val', 1),
-                f"{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm",
-                f"{s.get('mat_type', 'PVC')} (Dormant {s.get('frame_thig', 70)}mm)",
-                s.get('pose_type', '-'),
-                pb_txt,
-                f"Int: {s.get('col_in', '-')} / Ext: {s.get('col_ex', '-')}",
-                f"{nb_zones} Zone(s)",
-                vr_txt,
-                ailes_txt
-            ]
-        }, index=[
-            "Repère", "Quantité", "Dim. Dos Dormant", "Matériau", "Type de Pose", "Partie Basse", "Couleur", "Structure", "VR", "Ailettes"
-        ])
-        st.dataframe(df_infos, use_container_width=True)
+        # 2. RÉCAPITULATIF SOUS LE DESSIN
+        st.markdown("---")
         
-        # BOUTON EXPORT JSON
-        # BOUTON EXPORT PDF (HTML PRO)
-        import base64
-        import datetime
-        
-        # Prepare Data for Report
-        # Encode SVG for embedding
-        svg_b64 = base64.b64encode(svg_output.encode("utf-8")).decode("utf-8")
-        
-        # Zone details formatted for HTML
-        zones_html_rows = ""
-        for z in sorted_zones:
-            d_list = []
-            remp = z['params'].get('remplissage_global', 'Vitrage')
-            d_list.append(f"Remplissage: {remp}")
-            if remp == "Vitrage":
-                d_list.append(f"Vitrage: Ext {z['params'].get('vitrage_ext','4')} / Int {z['params'].get('vitrage_int','4')}")
-            if z['params'].get('grille_aera'): d_list.append(f"Grille: {z['params'].get('pos_grille')}")
-            if 'sens' in z['params']: d_list.append(f"Sens: {z['params']['sens']}")
-            
-            details_str = ", ".join(d_list)
-            zones_html_rows += f"<tr><td><strong>{z['label']}</strong> ({z['type']})</td><td>{details_str}</td></tr>"
-
-        menuiserie_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Fiche Technique - {s.get('ref_id', 'Menuiserie')}</title>
-            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
-            <style>
-                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
-                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
-                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
-                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
-                
-                /* STACKED LAYOUT */
-                .container {{ margin-bottom: 40px; }}
-                
-                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; margin-top: 30px; }}
-                
-                /* VISUAL (TOP, BIG) */
-                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 500px; margin-bottom: 40px; }}
-                .visual-box svg {{ width: 100%; height: auto; max-height: 800px; display: block; margin: auto; }}
-                
-                /* INFO (BOTTOM, FULL WIDTH) */
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 14px; column-count: 2; column-gap: 40px; }}
-                .info-row {{ display: flex; justify-content: flex-start; align-items: baseline; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; break-inside: avoid; }}
-                .info-row:last-child {{ border: 0; }}
-                .label {{ font-weight: bold; color: #555; white-space: nowrap; width: 150px; min-width: 150px; display: inline-block; }}
-                
-                table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
-                th {{ background: #2c3e50; color: white; padding: 10px; text-align: left; }}
-                td {{ border-bottom: 1px solid #ddd; padding: 8px; }}
-                .footer {{ margin-top: 50px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
-                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} .info-box {{ column-count: 2; }} }}
-            </style>
-        </head>
-        <body>
-            <div class="page-container">
-                <div class="header">
-                    <div>
-                        <h1>Fiche Technique</h1>
-                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">Menuiserie {s.get('mat_type', 'PVC')}</div>
-                    </div>
-                    <div class="ref" style="text-align: right;">
-                        <div>RÉFÉRENCE CHANTIER</div>
-                        <strong style="font-size: 18px; color: #000;">{s.get('ref_id', 'F1')}</strong>
-                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
-                    </div>
-                </div>
-
-                <div class="container">
-                    <!-- 1. PLAN TECHNIQUE (LARGE) -->
-                    <h2>Plan Technique</h2>
-                    <div class="visual-box">
-                        {svg_output}
-                    </div>
-                    
-                    <!-- 2. CARACTERISTIQUES (BELOW) -->
-                    <h2>Caractéristiques Générales</h2>
-                    <div class="info-box">
-                        <div class="info-row"><span class="label">Quantité</span> <span>{s.get('qte_val', 1)}</span></div>
-                        <div class="info-row"><span class="label">Dimensions</span> <span>{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)} mm</span></div>
-                        <div class="info-row"><span class="label">Dormant</span> <span>{s.get('frame_thig', 70)} mm</span></div>
-                        <div class="info-row"><span class="label">Pose</span> <span>{s.get('pose_type', '-')}</span></div>
-                        <div class="info-row"><span class="label">Partie Basse</span> <span>{pb_txt}</span></div>
-                        <div class="info-row"><span class="label">Couleur Int</span> <span>{s.get('col_in', '-')}</span></div>
-                        <div class="info-row"><span class="label">Couleur Ext</span> <span>{s.get('col_ex', '-')}</span></div>
-                        <div class="info-row"><span class="label">Volet Roulant</span> <span>{vr_txt}</span></div>
-                        <div class="info-row"><span class="label">Ailettes</span> <span>{ailes_txt}</span></div>
-                    </div>
-                </div>
-                
-                <h2>Détail des Zones</h2>
-                <table>
-                    <thead><tr><th style="width: 35%;">Zone</th><th>Détails Technique</th></tr></thead>
-                    <tbody>
-                        {zones_html_rows}
-                    </tbody>
-                </table>
-                
-                <div class="footer">
-                    Document généré par le Calculateur Menuiserie.<br>
-                    Les côtes sont "Dos de Dormant". Merci de vérifier avant validation.
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        st.download_button(
-            label="📄 Enregistrer PDF (Fiche Technique)",
-            data=menuiserie_html,
-            file_name=f"Fiche_{s.get('ref_id', 'F1')}.html",
-            mime="text/html"
-        )
-
-    with c_recap_right:
-        st.subheader("Détail des Zones")
+        # PREPARE ZONES DATA
         config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
-        
         sorted_zones = sorted(config_display, key=lambda z: z['id'])
-        
-        for z in sorted_zones:
-            # Clean Title "Zone X : Type"
-            # Remove "Zone " from z['label'] if explicit? No logic needed if label is clean.
-            # Assuming z['label'] is "Zone 1"
-            st.markdown(f"#### {z['label']} : {z['type']}")
-            
-            # Details: Remplissage, Vitrage, Grille
-            details_list = []
-            
-            # Remplissage
-            remp_global = z['params'].get('remplissage_global', 'Vitrage')
-            details_list.append(f"Remplissage : {remp_global}")
-            
-            # Vitrage details if applicable
-            if remp_global == "Vitrage":
-                v_txt = f"Ext {z['params'].get('vitrage_ext', '4mm')} / Int {z['params'].get('vitrage_int', '4mm')}"
-                details_list.append(f"Vitrage : {v_txt}")
-            
-            # Grille
-            if z['params'].get('grille_aera', False):
-                pos_g = z['params'].get('pos_grille', 'Vtl Principal')
-                details_list.append(f"Grille Aération : Oui ({pos_g})")
-                
-            # Sens
-            if 'sens' in z['params']:
-                 details_list.append(f"Sens : {z['params']['sens']}")
 
-            # Formatting as bullet points
-            for d in details_list:
-                st.markdown(f"- {d}")
-                
-            st.markdown("---")
+        # Nested columns for Recap
+        c_recap_l, c_recap_r = st.columns([1, 1])
 
-else:
-    if hab_config:
-        render_habillage_main_ui(hab_config)
+        with c_recap_l:
+            st.subheader("Info. Générales")
+            
+            s = st.session_state
+            
+            if s.get('is_appui_rap', False):
+                pb_txt = f"Appui Rapp. ({s.get('width_appui', 0)}mm)"
+            else:
+                pb_txt = "Bavette 100x100"
+                
+            vr_txt = "Oui" if s.get('vr_enable', False) else "Non"
+            h_ail = s.get('fin_val', 0)
+            b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
+            ailes_txt = f"H/G/D:{h_ail} B:{b_ail}"
+
+            try:
+                nb_zones = len(flatten_tree(s.get('zone_tree'), 0,0,0,0))
+            except: nb_zones = 1
+
+            df_infos = pd.DataFrame({
+                "Paramètre": ["Repère", "Qté", "Dim. Dos", "Matériau", "Pose", "Bas", "Couleur", "VR", "Ailettes"],
+                "Valeur": [
+                    s.get('ref_id', 'F1'),
+                    s.get('qte_val', 1),
+                    f"{s.get('width_dorm', 0)}x{s.get('height_dorm', 0)}",
+                    s.get('mat_type', 'PVC'),
+                    s.get('pose_type', '-')[:15]+"...",
+                    pb_txt,
+                    f"In:{s.get('col_in','-')[:5]}.. / Ex:{s.get('col_ex','-')[:5]}..",
+                    vr_txt,
+                    ailes_txt
+                ]
+            })
+            st.table(df_infos)
+            
+            # PDF EXPORT GENERATION
+            import base64
+            import datetime
+            zones_html_rows = ""
+            for z in sorted_zones:
+                d_list = []
+                remp = z['params'].get('remplissage_global', 'Vitrage')
+                d_list.append(f"Remplissage: {remp}")
+                if remp == "Vitrage":
+                    d_list.append(f"Vitrage: Ext {z['params'].get('vitrage_ext','4')} / Int {z['params'].get('vitrage_int','4')}")
+                if z['params'].get('grille_aera'): d_list.append(f"Grille: {z['params'].get('pos_grille')}")
+                if 'sens' in z['params']: d_list.append(f"Sens: {z['params']['sens']}")
+                details_str = ", ".join(d_list)
+                zones_html_rows += f"<tr><td><strong>{z['label']}</strong> ({z['type']})</td><td>{details_str}</td></tr>"
+
+            menuiserie_html = f"""
+            <!DOCTYPE html><html><head><meta charset="utf-8">
+            <style>
+                body {{ font-family: sans-serif; padding: 20px; }}
+                h1 {{ color:#2c3e50; }} table {{ width: 100%; border-collapse: collapse; margin-top:20px; }}
+                td, th {{ border: 1px solid #ddd; padding: 8px; }} th {{ background: #eee; }}
+            </style></head><body>
+            <h1>Fiche Technique - {s.get('ref_id', 'F1')}</h1>
+            <p><strong>Projet:</strong> {s.get('project', {}).get('name', 'P')}</p>
+            <div style="text-align:center; margin:20px;">{svg_output}</div>
+            <h2>Détails</h2>
+            <table>{zones_html_rows}</table>
+            </body></html>"""
+            
+            st.download_button(
+                label="📄 PDF (Fiche)",
+                data=menuiserie_html,
+                file_name=f"Fiche_{s.get('ref_id', 'F1')}.html",
+                mime="text/html"
+            )
+
+        with c_recap_r:
+            st.subheader("Détail Zones")
+            for z in sorted_zones:
+                with st.expander(f"{z['label']} : {z['type']}", expanded=True):
+                    remp_global = z['params'].get('remplissage_global', 'Vitrage')
+                    st.write(f"**Remp:** {remp_global}")
+                    if remp_global == "Vitrage":
+                        st.caption(f"Ex:{z['params'].get('vitrage_ext')} / In:{z['params'].get('vitrage_int')}")
+                    if z['params'].get('grille_aera'):
+                        st.caption(f"Grille: {z['params'].get('pos_grille')}")
+
+    else:
+        # HABILLAGE PREVIEW
+        if hab_config:
+            render_habillage_main_ui(hab_config)
+        else:
+            st.info("Configuration Habillage non initialisée.")
+
 
 # END OF CODE V73.5 (VALIDATED)
