@@ -882,8 +882,25 @@ def get_next_ref(current_ref):
 
 # --- HELPER: GENERATION DU SVG (PARTIE 3 - CUSTOM PROFILES) ---
 TYPES_OUVRANTS = ["Fixe", "1 Vantail", "2 Vantaux", "Coulissant", "Soufflet"]
-VITRAGES_INT = ["4mm", "33.2 (Sécurité)", "44.2 (Effraction)", "44.2 Silence"]
-VITRAGES_EXT = ["4mm", "6mm", "SP10 (Anti-effraction)", "Granité"]
+
+# Listes de données Vitrage (NEW V75)
+EPAISSEURS = ["3 mm", "4 mm", "5 mm", "6 mm", "8 mm", "10 mm", "12 mm"]
+FEUILLETES = ["33.2", "44.2", "SP10", "55.2", "SP512", "66.2", "SP514", "SP615B", "88.2", "10.10.2", "12.12.2"]
+ALL_GLASS = EPAISSEURS + FEUILLETES
+
+TYPES_VERRE = ["Clair", "Imprimé 200", "Dépoli", "Armé"]
+
+VIDE_AIR = ["6 mm", "8 mm", "10 mm", "12 mm", "14 mm", "16 mm", "18 mm", "20 mm", "24 mm"]
+
+INTERCALAIRES = [
+    "Alu Standard", "Alu Blanc", "Alu Noir",
+    "Warm Edge Noir", "Warm Edge Blanc",
+    "Swisspacer Blanc", "Swisspacer Noir"
+]
+
+# Règles de couches
+COUCHES_INT = ["Aucune", "FE (Faible Émissivité)"]
+COUCHES_EXT = ["Aucune", "SUN", "CS 70/30", "CS 60/40"]
 
 def config_zone_ui(label, key_prefix, current_node_type="Fixe"):
     # REMOVED EXPANDER to avoid nesting issues
@@ -944,9 +961,74 @@ def config_zone_ui(label, key_prefix, current_node_type="Fixe"):
             p['remplissage_global'] = st.radio("Remplissage Global", ["Vitrage", "Panneau"], horizontal=True, key=f"{key_prefix}_rg")
         
         st.markdown("🔍 **Composition Vitrage**")
-        cv1, cv2 = st.columns(2)
-        p['vitrage_ext'] = cv1.selectbox("Face Ext.", VITRAGES_EXT, key=f"{key_prefix}_ve")
-        p['vitrage_int'] = cv2.selectbox("Face Int.", VITRAGES_INT, key=f"{key_prefix}_vi")
+        
+        # --- NEW GLAZING CONFIGURATION ---
+        
+        # 1. Selection Mode: Simple vs Double
+        p['type_vitrage'] = st.radio("Type de Vitrage", ["Double Vitrage", "Simple Vitrage"], horizontal=True, key=f"{key_prefix}_tv")
+        
+        if p['type_vitrage'] == "Double Vitrage":
+            c_v1, c_v2, c_v3 = st.columns(3)
+            
+            # COL 1 : EXTERIEUR (Swapped as requested)
+            with c_v1:
+                st.caption("Extérieur")
+                # Default: 4mm (Index 1), Clair (Index 0)
+                p['vitrage_ext_ep'] = st.selectbox("Épaisseur Ext", ALL_GLASS, index=1, key=f"{key_prefix}_veep")
+                p['vitrage_ext_type'] = st.selectbox("Type Ext", TYPES_VERRE, index=0, key=f"{key_prefix}_vety")
+                p['vitrage_ext_couche'] = st.selectbox("Couche Ext", COUCHES_EXT, index=0, key=f"{key_prefix}_veco")
+                
+            # COL 2 : INTERCALAIRE / AIR
+            with c_v2:
+                st.caption("Lame d'Air")
+                # Default: 20mm (Index 7), Warm Edge Noir (Index 3)
+                p['vide_air_ep'] = st.selectbox("Épaisseur Air", VIDE_AIR, index=7, key=f"{key_prefix}_vae")
+                p['intercalaire_type'] = st.selectbox("Intercalaire", INTERCALAIRES, index=3, key=f"{key_prefix}_intc")
+                
+            # COL 3 : INTERIEUR
+            with c_v3:
+                st.caption("Intérieur")
+                # Default: 4mm (Index 1), Clair (Index 0), FE (Index 1)
+                p['vitrage_int_ep'] = st.selectbox("Épaisseur Int", ALL_GLASS, index=1, key=f"{key_prefix}_viep")
+                p['vitrage_int_type'] = st.selectbox("Type Int", TYPES_VERRE, index=0, key=f"{key_prefix}_vity")
+                p['vitrage_int_couche'] = st.selectbox("Couche Int", COUCHES_INT, index=1, key=f"{key_prefix}_vico")
+            
+            # FORMULA GENERATION: "4 / 20 / 4FE - WARM EDGE NOIR + GAZ ARGON"
+            ep_ext = p['vitrage_ext_ep'].replace(' mm', '').strip()
+            # Clean Couche Ext
+            c_ext = p['vitrage_ext_couche']
+            c_ext_str = "" if c_ext == "Aucune" else c_ext.replace("CS ", "CS").split(' ')[0] # Simplify
+            
+            air = p['vide_air_ep'].replace(' mm', '').strip()
+            
+            ep_int = p['vitrage_int_ep'].replace(' mm', '').strip()
+            # Clean Couche Int
+            c_int = p['vitrage_int_couche']
+            c_int_str = "" if c_int == "Aucune" else "FE" # Force FE notation
+            
+            inter = p['intercalaire_type'].upper()
+            
+            # Build parts
+            # Ext part: "4" or "4SUN"
+            part_ext = f"{ep_ext}{c_ext_str}"
+            # Int part: "4FE"
+            part_int = f"{ep_int}{c_int_str}"
+            
+            p['vitrage_resume'] = f"{part_ext} / {air} / {part_int} - {inter} + GAZ ARGON"
+            
+        else: # Simple Vitrage
+            c_v1, _ = st.columns([1, 2])
+            with c_v1:
+                st.caption("Vitrage Unique")
+                p['vitrage_simple_ep'] = st.selectbox("Épaisseur", ALL_GLASS, key=f"{key_prefix}_vsep")
+                p['vitrage_simple_type'] = st.selectbox("Type", TYPES_VERRE, key=f"{key_prefix}_vsty")
+                p['vitrage_simple_couche'] = st.selectbox("Couche", ["Aucune", "FE", "SUN", "CS 70/30"], key=f"{key_prefix}_vsco")
+            
+            p['vitrage_resume'] = f"{p['vitrage_simple_ep']} {p['vitrage_simple_type']} {p['vitrage_simple_couche']}"
+
+        # Compatibility Keys (Keep existing keys for SVG if needed)
+        p['vitrage_ext'] = p.get('vitrage_ext_type', 'V.Ext') 
+        p['vitrage_int'] = p.get('vitrage_int_type', 'V.Int')
 
         st.markdown("💨 **Ventilation**")
         opts_grille = ["Aucune", "Vtl Principal"]
@@ -3278,7 +3360,10 @@ with c_preview:
                 remp_global = z['params'].get('remplissage_global', 'Vitrage')
                 extra_info = ""
                 if remp_global == "Vitrage":
-                    extra_info = f" | {z['params'].get('vitrage_ext')} / {z['params'].get('vitrage_int')}"
+                    if 'vitrage_resume' in z['params']:
+                         extra_info = f" | {z['params']['vitrage_resume']}"
+                    else:
+                         extra_info = f" | {z['params'].get('vitrage_ext')} / {z['params'].get('vitrage_int')}"
                 
                 grille_info = ""
                 if z['params'].get('pos_grille') and z['params'].get('pos_grille') != "Aucune":
