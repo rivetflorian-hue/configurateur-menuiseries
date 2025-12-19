@@ -2115,135 +2115,185 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     final_svg += '</svg>'
     return final_svg
 
-def render_html_habillage(cfg, svg_string, logo_b64, dev_val):
-    """HTML generation for Habillage printing (Matching Menuiserie Layout)."""
+def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
+    """HTML generation for Habillage printing (Single Page, Compact, Logo Header)."""
     
-    # Common CSS
     css = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
-        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 10px; font-size: 12px; }
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        
         .page-container { 
             max-width: 210mm; 
             margin: 0 auto; 
-            border: 1px solid #ddd;
             padding: 20px;
-            background: white;
+        }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+
+        /* GRID LAYOUT */
+        .grid-container { display: grid; grid-template-columns: 35% 60%; gap: 5%; margin-bottom: 20px; }
+        
+        /* HEADINGS */
+        h3 { 
+            font-size: 14px; color: #2c3e50; margin: 0 0 10px 0; 
+            border-left: 4px solid #3498db; padding-left: 8px; 
+            line-height: 1.2;
         }
         
-        /* Header */
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0056b3; padding-bottom: 10px; margin-bottom: 15px; }
-        .meta { text-align: right; font-size: 12px; color: #555; }
-        .meta h2 { margin: 0; color: #333; font-size: 22px; }
+        /* PANELS */
+        .panel { background: #f9f9f9; padding: 10px; border-radius: 4px; font-size: 12px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #555; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; }
         
-        /* Compact Grid Layout */
-        .top-row { display: flex; gap: 20px; margin-bottom: 15px; }
-        .col-left { flex: 1; }
-        .col-right { flex: 1; }
-        
-        .box { border: 1px solid #eee; padding: 10px; border-radius: 4px; height: 100%; }
-        .box-title { 
-            font-weight: bold; background: #f4f6f9; color: #333; 
-            padding: 5px 10px; margin: -10px -10px 10px -10px; 
-            border-bottom: 1px solid #eee; font-size: 13px;
+        .schema-box { 
+            border: 1px solid #eee; border-radius: 4px; padding: 5px; 
+            text-align: center; height: 160px; display: flex; align-items: center; justify-content: center;
+            margin-bottom: 15px;
         }
+        .schema-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        .info-table { width: 100%; border-collapse: collapse; }
-        .info-table td { padding: 4px 0; border-bottom: 1px solid #f9f9f9; }
-        .label { font-weight: bold; color: #666; width: 40%; display: inline-block; }
-        
-        /* Plan Technique */
-        .plan-container { 
-            text-align: center; 
-            border: 1px solid #eee; 
-            padding: 10px; 
-            margin-top: 10px;
-            page-break-inside: avoid;
+        .visual-box {
+            border: 1px solid #eee; border-radius: 4px; height: 300px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative;
         }
-        svg { max-height: 400px; width: auto; max-width: 100%; }
+        .visual-box svg { max-height: 260px; width: auto; max-width: 95%; }
+        
+        /* TABLE DETAILS */
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+        th { background: #2c3e50; color: white; padding: 6px; text-align: left; text-transform: uppercase; font-size: 10px; }
+        td { border-bottom: 1px solid #eee; padding: 6px; color: #444; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        
+        .footer { 
+            margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; 
+            font-size: 9px; color: #999; text-align: center; 
+        }
 
         @media print {
-            body { padding: 0; background: white; }
-            .page-container { border: none; padding: 0; margin: 0; }
+            @page { size: A4; margin: 10mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
             .no-print { display: none; }
         }
     </style>
     """
     
-    # Logo Logic
-    logo_img = ""
-    if logo_b64:
-        try:
-             # Standard size matching Menuiserie
-             logo_img = f'<img src="data:image/jpeg;base64,{logo_b64}" style="max-height: 80px; margin-right: 0px;">'
-        except: pass
-    
-    # Precompute Display Values
+    # Precompute
     import datetime
     prof_name = cfg['prof']['name']
     
-    # Dims string
+    # Dims string logic
     exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
     dim_str_display = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
     
+    # Surface
+    try:
+        surface = (dev_val * cfg['length'] * cfg['qte']) / 1000000
+    except:
+        surface = 0
+
+    # Schema Image HTML
+    schema_html = ""
+    if schema_b64:
+        schema_html = f'<img src="data:image/jpeg;base64,{schema_b64}">'
+    else:
+        schema_html = '<span style="color:#ccc;">Aucune image</span>'
+
+    # Logo HTML (Replaces Title)
+    logo_html = f"<h1>Fiche Technique</h1>"
+    if logo_b64:
+        logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
+
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>{css}</head>
     <body>
         <div class="page-container">
+            <!-- HEADER -->
             <div class="header">
-                <div style="display:flex; align-items:center;">
-                    {logo_img}
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">{prof_name}</div>
                 </div>
-                <div class="meta">
-                    <h2>{cfg['ref']}</h2>
-                    <div>Habillage - {prof_name} | {datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE CHANTIER</div>
+                    <div class="ref">{cfg['ref']}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
                 </div>
             </div>
             
-            <div class="top-row">
-                <!-- COL LEFT: INFO -->
-                <div class="col-left">
-                    <div class="box">
-                        <div class="box-title">1. Informations</div>
-                        <div class="info-table">
-                            <div><span class="label">Référence:</span> {cfg['ref']}</div>
-                            <div><span class="label">Modèle:</span> {prof_name}</div>
-                            <div><span class="label">Quantité:</span> {cfg['qte']}</div>
-                            <div><span class="label">Dimensions:</span> {dim_str_display}</div>
-                            <div><span class="label">Long. (mm):</span> {cfg['length']}</div>
-                            <div><span class="label">Dev. (mm):</span> {int(dev_val)}</div>
-                            <div><span class="label">Matière:</span> {cfg['finition']}</div>
-                            <div><span class="label">Épaisseur:</span> {cfg['epaisseur']}</div>
-                            <div><span class="label">Couleur:</span> {cfg['couleur']}</div>
+            <!-- MAIN GRID -->
+            <div class="grid-container">
+                <!-- LEFT COLUMN -->
+                <div>
+                    <h3>Schéma de Principe</h3>
+                    <div class="schema-box">
+                        {schema_html}
+                    </div>
+                    
+                    <h3>Caractéristiques</h3>
+                    <div class="panel">
+                        <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{cfg['qte']}</span></div>
+                        <div class="panel-row"><span class="lbl">Longueur</span> <span class="val">{cfg['length']} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Développé</span> <span class="val">{int(dev_val)} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Matière</span> <span class="val">{cfg['finition']}</span></div>
+                        <div class="panel-row"><span class="lbl">Couleur</span> <span class="val">{cfg['couleur']}</span></div>
+                        <div class="panel-row"><span class="lbl">Épaisseur</span> <span class="val">{cfg['epaisseur']}</span></div>
+                        
+                        <div style="margin-top:10px; padding-top:10px; border-top:1px solid #ddd;">
+                            <span class="lbl">Dimensions :</span> <br>
+                            <span style="font-family:monospace; color:#333;">{dim_str_display}</span>
                         </div>
                     </div>
                 </div>
                 
-                <!-- COL RIGHT: Additional -->
-                <div class="col-right">
-                     <div class="box">
-                        <div class="box-title">2. Notes / Schéma 2D</div>
-                         <div style="text-align:center; padding:20px; color:#aaa;">
-                            <em>Schéma de principe (voir ci-contre ou ci-dessous)</em>
-                        </div>
-                     </div>
+                <!-- RIGHT COLUMN -->
+                <div>
+                    <h3>Visualisation 3D</h3>
+                    <div class="visual-box">
+                        {svg_string}
+                        <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue filaire indicative</div>
+                    </div>
                 </div>
             </div>
             
-            <!-- BOTTOM: 3D SVG -->
-            <div class="plan-container">
-                <div class="box-title" style="margin-bottom:10px;">3. Visualisation Filaire</div>
-                {svg_string}
-            </div>
+            <!-- FOOTER TABLE -->
+            <h3>Détails de Commande</h3>
+            <table>
+                <thead>
+                    <tr><th>Libellé</th><th style="text-align:right;">Valeur</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Référence</td><td style="text-align:right;">{cfg['ref']}</td></tr>
+                    <tr><td>Modèle</td><td style="text-align:right;">{prof_name}</td></tr>
+                    <tr><td>Quantité</td><td style="text-align:right;">{cfg['qte']}</td></tr>
+                    <tr><td>Dimensions</td><td style="text-align:right;">{dim_str_display}</td></tr>
+                    <tr><td>Longueur</td><td style="text-align:right;">{cfg['length']} mm</td></tr>
+                    <tr><td>Développé</td><td style="text-align:right;">{int(dev_val)} mm</td></tr>
+                    <tr><td>Surface Totale</td><td style="text-align:right;">{surface:.2f} m²</td></tr>
+                </tbody>
+            </table>
             
-             <div style="text-align:center; margin-top:15px; font-size:10px; color:#999;">
-                Miroiterie Yerroise - Document généré automatiquement
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise<br>
+                Merci de vérifier les cotes avant validation définitive.
             </div>
         </div>
         <script>
-            setTimeout(() => {{ window.print(); }}, 500);
+            setTimeout(() => {{ window.print(); }}, 800);
         </script>
     </body>
     </html>
@@ -2316,12 +2366,18 @@ def render_habillage_main_ui(cfg):
         # Let's assume I actually put `render_html_habillage` IN app.py in a previous step or will do it now.
         # I'll put the function definition at the top of app.py or near render_html_template.
         
-        # from render_habillage_utils import render_html_habillage # INLINED
-        st.session_state['print_ts_hab'] = datetime.datetime.now().isoformat()
+        # Prepare Schema B64 (Restored)
+        schema_b64 = ""
+        img_p = os.path.join(ARTIFACT_DIR, prof['image_key'])
+        if os.path.exists(img_p):
+             import base64
+             with open(img_p, "rb") as f:
+                 schema_b64 = base64.b64encode(f.read()).decode()
+
         st.session_state['print_ts_hab'] = datetime.datetime.now().isoformat()
         
-        # Pass SVG, Logo (Global), and Dev (Calculated above)
-        html_content = render_html_habillage(cfg, svg, LOGO_B64, dev)
+        # Pass SVG, Logo (Global), Dev, and Schema
+        html_content = render_html_habillage(cfg, svg, LOGO_B64, dev, schema_b64)
         html_content += f"<!-- TS: {st.session_state['print_ts_hab']} -->"
         
         import streamlit.components.v1 as components
