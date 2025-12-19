@@ -945,18 +945,29 @@ def config_zone_ui(label, key_prefix, current_node_type="Fixe"):
         st.info("Poignée : Centrée en traverse haute (Fixe)")
     
     with st.expander(f"⚙️ Finitions {label}"):
-        p['traverses'] = st.number_input("Traverses Horiz.", 0, 5, 0, key=f"{key_prefix}_trav")
-        if p['traverses'] >= 1:
-            # V73 FIX: Allow user to edit Thickness of Petit Bois
+        ct1, ct2 = st.columns(2)
+        p['traverses'] = ct1.number_input("Traverses Horiz.", 0, 10, 0, key=f"{key_prefix}_trav")
+        p['traverses_v'] = ct2.number_input("Traverses Vert.", 0, 10, 0, key=f"{key_prefix}_trav_v")
+        
+        nb_h = p['traverses']
+        nb_v = p['traverses_v']
+        
+        if nb_h > 0 or nb_v > 0:
+            # Common Thickness
             p['epaisseur_traverse'] = st.number_input("Épaisseur Traverse (mm)", 10, 100, 20, step=5, key=f"{key_prefix}_eptrav")
             
-            if p['traverses'] == 1:
+            # MODE SOUBASSEMENT (Strictly 1 H, 0 V)
+            if nb_h == 1 and nb_v == 0:
                 p['pos_traverse'] = st.radio("Position", ["Centrée", "Sur mesure (du bas)"], horizontal=True, key=f"{key_prefix}_pos_t")
                 if p['pos_traverse'] == "Sur mesure (du bas)":
                     p['h_traverse_custom'] = st.number_input("Cote axe depuis bas (mm)", 100, 2000, 800, 10, key=f"{key_prefix}_h_t")
                 cr1, cr2 = st.columns(2)
                 p['remp_haut'] = cr1.radio("Remplissage HAUT", ["Vitrage", "Panneau"], key=f"{key_prefix}_rh")
                 p['remp_bas'] = cr2.radio("Remplissage BAS", ["Panneau", "Vitrage"], key=f"{key_prefix}_rb")
+            else:
+                # MODE PETITS BOIS (Grid)
+                st.info(f"Grille décorative : {nb_h} Horiz. x {nb_v} Vert.")
+                p['remplissage_global'] = st.radio("Remplissage Global", ["Vitrage", "Panneau"], horizontal=True, key=f"{key_prefix}_rg_grid")
         else:
             p['remplissage_global'] = st.radio("Remplissage Global", ["Vitrage", "Panneau"], horizontal=True, key=f"{key_prefix}_rg")
         
@@ -1284,10 +1295,12 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
     
     # Helper interne pour dessiner un "bloc vitré/panneau"
     def draw_leaf_interior(lx, ly, lw, lh, z_start=None):
-        nb_trav = params.get('traverses', 0)
+        nb_h = params.get('traverses', 0)
+        nb_v = params.get('traverses_v', 0)
         z_eff = z_start if z_start is not None else z_base
         
-        if nb_trav == 1:
+        # MODE SOUBASSEMENT (Strictly 1 H, 0 V)
+        if nb_h == 1 and nb_v == 0:
             pos_trav = params.get('pos_traverse', 'Centrée')
             h_custom = params.get('h_traverse_custom', 800)
             ep_trav = params.get('epaisseur_traverse', 20) # V73 FIX: Used input value
@@ -1314,41 +1327,42 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
             draw_rect(svg, lx, y_trav_start, lw, ep_trav, c_frame, "black", 1, z_eff+2)
             
             # --- COTE HAUTEUR TRAVERSE (V74 FIX) ---
-            # Dessiner une cote visible pour la hauteur de traverse
-            # Position: Droite ou Gauche de la vitre
-            # On la met dans le vitrage (discret mais lisible)
-            
-            # Calcul Hauteur (Axe)
             ltx = lx + lw - 30 
             if pos_trav == "Sur mesure (du bas)":
                # Cote depuis le bas
                draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_custom, "", -10, "V", font_size=16, z_index=z_eff+10)
             else:
-               # Cote centrée (relative au haut ?) ou juste marquer "H/2"
-               # On affiche la cote réelle depuis le bas pour info
                h_reel_bas = (ly+lh) - y_center
                draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_reel_bas, "", -10, "V", font_size=16, z_index=z_eff+10)
 
-            
         else:
-            remp_glob = params.get('remplissage_global', 'Vitrage')
-            # DEBUG removed
+            # MODE GLOBAL / PETITS BOIS (GRID)
+            remp_glob = params.get('remplissage_global', 'Vitrage') or params.get('remplissage_global', 'Vitrage') # Fallback
+            # Note: config_zone_ui uses 'remplissage_global' for grid too.
+            
             col_g = "#F0F0F0" if remp_glob == "Panneau" else config_global['color_glass']
-            # z_eff = 50
             draw_rect(svg, lx, ly, lw, lh, col_g, "black", 1, z_eff+1)
             
-            if nb_trav > 1:
-                ep_trav = params.get('epaisseur_traverse', 20) # V73 FIX for multiple traverses
-                # Simple distribution
-                # If N traverses, N+1 spaces? 
-                # Calculation: Total H. Space = (TotalH - N*Ep)/ (N+1).
-                # Current code: section_h = lh / (nb_trav + 1). This assumes center-lines.
-                # Let's keep simple distribution but use ep_trav for the rect height.
+            # Only draw grid if there are traverses
+            if nb_h > 0 or nb_v > 0:
+                ep_trav = params.get('epaisseur_traverse', 20)
                 
-                section_h = lh / (nb_trav + 1)
-                for k in range(1, nb_trav + 1):
-                    ty = ly + (section_h * k) - (ep_trav/2)
-                    draw_rect(svg, lx, ty, lw, ep_trav, c_frame, "black", 1, z_eff+2)
+                # DRAW HORIZONTAL
+                if nb_h > 0:
+                    section_h = lh / (nb_h + 1)
+                    for k in range(1, nb_h + 1):
+                        ty = ly + (section_h * k) - (ep_trav/2)
+                        draw_rect(svg, lx, ty, lw, ep_trav, c_frame, "black", 1, z_eff+2)
+                
+                # DRAW VERTICAL
+                if nb_v > 0:
+                    section_w = lw / (nb_v + 1)
+                    for k in range(1, nb_v + 1):
+                        tx = lx + (section_w * k) - (ep_trav/2)
+                        # Vertical bar spans full height (crosses horizontal)
+                        # Or should it be cut? Usually petits bois are continuous or mortised.
+                        # Drawing V on top or below H implies joint type. To keep simple, draw V full height.
+                        draw_rect(svg, tx, ly, ep_trav, lh, c_frame, "black", 1, z_eff+2)
 
     # --- TYPES OUVRANTS ---
     if type_ouv == "Fixe":
