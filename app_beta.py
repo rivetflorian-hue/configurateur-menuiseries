@@ -126,14 +126,110 @@ def generate_pdf_report(data_dict, svg_string=None):
         c.showPage()
         c.save()
         buffer.seek(0)
-        return buffer
+        return buffer, None # Success
     except Exception as e:
-        # GLOBAL CRASH CATCHER -> Return text error in a buffer to download as txt? 
-        # Or better: return None and let UI handle it?
-        # User requested: "Si une image échoue... le PDF doit quand même se générer".
-        # This global catch matches unforeseen errors.
-        print(f"CRITICAL PDF ERROR: {e}") 
-        return None
+        # GLOBAL CRASH CATCHER
+        return None, f"{str(e)}" # Return error details
+
+def render_html_template(s, svg_string):
+    """Fallback HTML generation for printing."""
+    
+    # Basic CSS for printing
+    css = """
+    <style>
+        .report-container { font-family: Helvetica, Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+        .title { font-size: 24px; font-weight: bold; color: #333; }
+        .meta { text-align: right; font-size: 12px; color: #666; }
+        .section { margin-bottom: 20px; }
+        .section-title { font-size: 16px; font-weight: bold; background-color: #f0f0f0; padding: 5px 10px; margin-bottom: 10px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+        .info-item { display: flex; }
+        .label { font-weight: bold; width: 120px; }
+        .value { flex: 1; }
+        .svg-container { text-align: center; margin: 20px 0; border: 1px solid #eee; padding: 10px; }
+        .zones-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .zones-table th, .zones-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .zones-table th { background-color: #f9f9f9; }
+        @media print {
+            body { -webkit-print-color-adjust: exact; }
+            .no-print { display: none; }
+        }
+    </style>
+    """
+    
+    # Header
+    logo_html = ""
+    if LOGO_B64:
+        logo_html = f'<img src="data:image/jpeg;base64,{LOGO_B64}" style="max-height: 60px;">'
+        
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>{css}</head>
+    <body>
+        <div class="report-container">
+            <div class="header">
+                <div>{logo_html}</div>
+                <div class="meta">
+                    <div class="title">Fiche Technique - {s.get('ref_id', 'F1')}</div>
+                    <div>Projet: {s.get('project', {}).get('name', 'P')}</div>
+                    <div>Date: {datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">1. Informations Générales</div>
+                <div class="info-grid">
+                    <div class="info-item"><span class="label">Dimensions:</span><span class="value">{s.get('width_dorm')} x {s.get('height_dorm')} mm</span></div>
+                    <div class="info-item"><span class="label">Matériau:</span><span class="value">{s.get('mat_type')} - {s.get('pose_type')}</span></div>
+                    <div class="info-item"><span class="label">Couleurs:</span><span class="value">Int {s.get('col_in')} / Ext {s.get('col_ex')}</span></div>
+                    <div class="info-item"><span class="label">Dormant:</span><span class="value">{s.get('frame_thig')} mm</span></div>
+                    <div class="info-item"><span class="label">Ailettes:</span><span class="value">{s.get('fin_val')} mm (Bas: {s.get('fin_bot') if not s.get('same_bot') else s.get('fin_val')})</span></div>
+                    <div class="info-item"><span class="label">Quantité:</span><span class="value">{s.get('qte_val')}</span></div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">2. Plan Technique</div>
+                <div class="svg-container">
+                    {svg_string if svg_string else "Schéma non disponible"}
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">3. Détails des Zones</div>
+                <table class="zones-table">
+                    <thead><tr><th>Zone</th><th>Caractéristiques</th></tr></thead>
+                    <tbody>
+    """
+    
+    # Zones loop
+    flat = flatten_tree(s.get('zone_tree'), 0,0,0,0)
+    real = [z for z in flat if z['type'] != 'split']
+    sorted_zones = sorted(real, key=lambda z: (z['y'], z['x']))
+    
+    for z in sorted_zones:
+        p = z['params']
+        details = [f"Remp: {p.get('remplissage_global', 'Vitrage')}"]
+        if p.get('remplissage_global') == 'Vitrage':
+            details.append(f"Vit: Ext {p.get('vitrage_ext','-')} / Int {p.get('vitrage_int','-')}")
+        html += f"<tr><td>{z['label']}</td><td>{' | '.join(details)}</td></tr>"
+        
+    html += """
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="text-align:center; font-size:10px; color:#999; margin-top:30px;">
+                Miroiterie Yerroise - Document généré automatiquement
+            </div>
+        </div>
+        <script>window.print();</script>
+    </body>
+    </html>
+    """
+    return html
 
 # --- CSS MOBILE & PRINT FIX ---
 st.markdown("""
@@ -2967,8 +3063,8 @@ with c_preview:
 
 
 
-# Use the function
-        pdf_buffer = generate_pdf_report(s, svg_output)
+# Use the function - RESTORED HTML FALLBACK
+        pdf_buffer, pdf_error = generate_pdf_report(s, svg_output)
 
         if pdf_buffer:
             st.download_button(
@@ -2978,8 +3074,14 @@ with c_preview:
                 mime="application/pdf"
             )
         else:
-            st.error("❌ Erreur CRITIQUE : Impossible de générer le fichier PDF.")
-            st.warning("Veuillez contacter le support.")
+            # Fallback HTML
+            st.error(f"⚠️ PDF Indisponible : {pdf_error}")
+            if st.button("🖨️ Imprimer (Version HTML de secours)"):
+                html_content = render_html_template(s, svg_output)
+                # Use a clever trick to open print dialog
+                import streamlit.components.v1 as components
+                components.html(html_content, height=0, width=0)
+                st.info("Impression lancée... Vérifiez vos popups.")
 
 
         with c_recap_r:
