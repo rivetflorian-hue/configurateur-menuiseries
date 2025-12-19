@@ -2710,11 +2710,7 @@ def render_menuiserie_form():
         type_projet = c_m1.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
         mat = c_m2.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
-        # Color Logic
-        if mat == "PVC":
-            liste_couleurs = ["Blanc (9016)", "Plaxé Chêne", "Plaxé Gris 7016", "Beige"]
-        else: 
-            liste_couleurs = ["Blanc (9016)", "Gris 7016 Texturé", "Noir 2100 Sablé", "Anodisé Argent"]
+        # Color Logic handled below in section 6
 
         st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
 
@@ -2761,8 +2757,41 @@ def render_menuiserie_form():
         # Pull bottom line closer
         st.markdown("<hr style='margin:0px 0 10px 0'>", unsafe_allow_html=True)
         cc1, cc2 = st.columns(2)
-        col_int = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in")
-        col_ext = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
+        
+        # DEFINITION DES COULEURS (Market Standards)
+        if mat == "PVC":
+            liste_couleurs = [
+                "Blanc (Masse)",
+                "Beige (Masse)",
+                "Gris Anthracite (Plaxé 7016)",
+                "Chêne Doré (Plaxé)",
+                "Autre / RAL Spécifique"
+            ]
+        else: # ALU
+            liste_couleurs = [
+                "Blanc Satiné (9016)",
+                "Gris Anthracite Texturé (7016)",
+                "Noir Sablé (2100)",
+                "Gris Pierre de Lune (7035)",
+                "AS (Aluminium Standard / Anodisé)",
+                "Gris Argent (9006)",
+                "Brun (8019)",
+                "Autre / RAL Spécifique"
+            ]
+            
+        # INTERIEUR
+        sel_c1 = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in_select")
+        if sel_c1 == "Autre / RAL Spécifique":
+            st.session_state['col_in'] = cc1.text_input("RAL Int.", placeholder="Ex: Rouge 3004", key="col_in_custom")
+        else:
+            st.session_state['col_in'] = sel_c1
+            
+        # EXTERIEUR
+        sel_c2 = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex_select")
+        if sel_c2 == "Autre / RAL Spécifique":
+            st.session_state['col_ex'] = cc2.text_input("RAL Ext.", placeholder="Ex: Bleu 5003", key="col_ex_custom")
+        else:
+            st.session_state['col_ex'] = sel_c2
 
     # --- SECTION 3 : DIMENSIONS ---
     with st.expander("3. Dimensions & VR", expanded=False):
@@ -2804,6 +2833,10 @@ def render_menuiserie_form():
              
         # Calcul des zones à plat pour le dessin
         zones_config = flatten_tree(st.session_state['zone_tree'], 0, 0, l_dos_dormant, h_menuiserie)
+        
+        # Compatibility with legacy code
+        col_int = st.session_state.get('col_in', 'Blanc')
+        # col_ext = st.session_state.get('col_ex', 'Blanc')
         
         color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
         hex_col = "#FFFFFF"
