@@ -2115,6 +2115,141 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     final_svg += '</svg>'
     return final_svg
 
+def render_html_habillage(cfg, svg_string, logo_b64, dev_val):
+    """HTML generation for Habillage printing (Matching Menuiserie Layout)."""
+    
+    # Common CSS
+    css = """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 10px; font-size: 12px; }
+        .page-container { 
+            max-width: 210mm; 
+            margin: 0 auto; 
+            border: 1px solid #ddd;
+            padding: 20px;
+            background: white;
+        }
+        
+        /* Header */
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0056b3; padding-bottom: 10px; margin-bottom: 15px; }
+        .meta { text-align: right; font-size: 12px; color: #555; }
+        .meta h2 { margin: 0; color: #333; font-size: 22px; }
+        
+        /* Compact Grid Layout */
+        .top-row { display: flex; gap: 20px; margin-bottom: 15px; }
+        .col-left { flex: 1; }
+        .col-right { flex: 1; }
+        
+        .box { border: 1px solid #eee; padding: 10px; border-radius: 4px; height: 100%; }
+        .box-title { 
+            font-weight: bold; background: #f4f6f9; color: #333; 
+            padding: 5px 10px; margin: -10px -10px 10px -10px; 
+            border-bottom: 1px solid #eee; font-size: 13px;
+        }
+        
+        .info-table { width: 100%; border-collapse: collapse; }
+        .info-table td { padding: 4px 0; border-bottom: 1px solid #f9f9f9; }
+        .label { font-weight: bold; color: #666; width: 40%; display: inline-block; }
+        
+        /* Plan Technique */
+        .plan-container { 
+            text-align: center; 
+            border: 1px solid #eee; 
+            padding: 10px; 
+            margin-top: 10px;
+            page-break-inside: avoid;
+        }
+        svg { max-height: 400px; width: auto; max-width: 100%; }
+
+        @media print {
+            body { padding: 0; background: white; }
+            .page-container { border: none; padding: 0; margin: 0; }
+            .no-print { display: none; }
+        }
+    </style>
+    """
+    
+    # Logo Logic
+    logo_img = ""
+    if logo_b64:
+        try:
+             # Standard size matching Menuiserie
+             logo_img = f'<img src="data:image/jpeg;base64,{logo_b64}" style="max-height: 80px; margin-right: 0px;">'
+        except: pass
+    
+    # Precompute Display Values
+    import datetime
+    prof_name = cfg['prof']['name']
+    
+    # Dims string
+    exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
+    dim_str_display = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>{css}</head>
+    <body>
+        <div class="page-container">
+            <div class="header">
+                <div style="display:flex; align-items:center;">
+                    {logo_img}
+                </div>
+                <div class="meta">
+                    <h2>{cfg['ref']}</h2>
+                    <div>Habillage - {prof_name} | {datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
+            </div>
+            
+            <div class="top-row">
+                <!-- COL LEFT: INFO -->
+                <div class="col-left">
+                    <div class="box">
+                        <div class="box-title">1. Informations</div>
+                        <div class="info-table">
+                            <div><span class="label">Référence:</span> {cfg['ref']}</div>
+                            <div><span class="label">Modèle:</span> {prof_name}</div>
+                            <div><span class="label">Quantité:</span> {cfg['qte']}</div>
+                            <div><span class="label">Dimensions:</span> {dim_str_display}</div>
+                            <div><span class="label">Long. (mm):</span> {cfg['length']}</div>
+                            <div><span class="label">Dev. (mm):</span> {int(dev_val)}</div>
+                            <div><span class="label">Matière:</span> {cfg['finition']}</div>
+                            <div><span class="label">Épaisseur:</span> {cfg['epaisseur']}</div>
+                            <div><span class="label">Couleur:</span> {cfg['couleur']}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- COL RIGHT: Additional -->
+                <div class="col-right">
+                     <div class="box">
+                        <div class="box-title">2. Notes / Schéma 2D</div>
+                         <div style="text-align:center; padding:20px; color:#aaa;">
+                            <em>Schéma de principe (voir ci-contre ou ci-dessous)</em>
+                        </div>
+                     </div>
+                </div>
+            </div>
+            
+            <!-- BOTTOM: 3D SVG -->
+            <div class="plan-container">
+                <div class="box-title" style="margin-bottom:10px;">3. Visualisation Filaire</div>
+                {svg_string}
+            </div>
+            
+             <div style="text-align:center; margin-top:15px; font-size:10px; color:#999;">
+                Miroiterie Yerroise - Document généré automatiquement
+            </div>
+        </div>
+        <script>
+            setTimeout(() => {{ window.print(); }}, 500);
+        </script>
+    </body>
+    </html>
+    """
+    return html
+
 def get_html_download_link(content_html, filename, label):
     import base64
     b64 = base64.b64encode(content_html.encode()).decode()
@@ -2171,7 +2306,28 @@ def render_habillage_main_ui(cfg):
         
         st.download_button("🖼️ Télécharger SVG", svg, f"profil_{cfg['ref']}.svg", "image/svg+xml")
 
+    # --- PRINT BUTTON (HTML) ---
     st.markdown("---")
+    if st.button("🖨️ Imprimer", key="btn_print_hab"):
+        # Import helper (or define it in app.py)
+        # For simplicity, we inline the logic or assume the function is pasted in app.py
+        # Since I wrote it to a separate file, I should read it or paste it. 
+        # But wait, I can just define it inside app.py for simplicity as requested by user constraints (single file preference?)
+        # Let's assume I actually put `render_html_habillage` IN app.py in a previous step or will do it now.
+        # I'll put the function definition at the top of app.py or near render_html_template.
+        
+        # from render_habillage_utils import render_html_habillage # INLINED
+        st.session_state['print_ts_hab'] = datetime.datetime.now().isoformat()
+        st.session_state['print_ts_hab'] = datetime.datetime.now().isoformat()
+        
+        # Pass SVG, Logo (Global), and Dev (Calculated above)
+        html_content = render_html_habillage(cfg, svg, LOGO_B64, dev)
+        html_content += f"<!-- TS: {st.session_state['print_ts_hab']} -->"
+        
+        import streamlit.components.v1 as components
+        components.html(html_content, height=0, width=0)
+        st.info(f"Impression lancée... ({st.session_state['print_ts_hab'].split('T')[1][:8]})")
+
     st.subheader("Récapitulatif (Habillage)")
     
     col_table, col_export = st.columns([3, 1])
@@ -2191,6 +2347,7 @@ def render_habillage_main_ui(cfg):
         st.write("")
         st.write("")
         
+        # JSON EXPORT
         hab_data = {
             "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
             "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
@@ -2199,103 +2356,8 @@ def render_habillage_main_ui(cfg):
         json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
         st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
 
-        import base64
-        img_b64 = ""
-        if os.path.exists(image_path):
-             with open(image_path, "rb") as f:
-                 img_b64 = base64.b64encode(f.read()).decode()
-        
-        html_report = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Fiche Technique - {prof['name']}</title>
-            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
-            <style>
-                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
-                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
-                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
-                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
-                .main-grid {{ display: grid; grid-template-columns: 40% 55%; gap: 5%; margin-bottom: 40px; }}
-                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
-                .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 15px; }}
-                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
-                .info-row:last-child {{ border: 0; }}
-                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 100px; }}
-                .dims-val {{ font-size: 16px; color: #2c3e50; text-align: left; }}
-                .dims-row {{ justify-content: flex-start; gap: 20px; }}
-                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
-                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
-                table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
-                th {{ background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 500; }}
-                td {{ border-bottom: 1px solid #ddd; padding: 10px; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .footer {{ margin-top: 60px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
-                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
-            </style>
-        </head>
-        <body>
-            <div class="page-container">
-                <div class="header">
-                    <div>
-                        <h1>Fiche Technique</h1>
-                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">{prof['name']}</div>
-                    </div>
-                    <div class="ref" style="text-align: right;">
-                        <div>RÉFÉRENCE CHANTIER</div>
-                        <strong style="font-size: 18px; color: #000;">{cfg['ref']}</strong>
-                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
-                    </div>
-                </div>
-                
-                <div class="main-grid">
-                    <div>
-                        <h2>Schéma de Principe</h2>
-                        <div class="schema-box">
-                             <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; max-height: 200px;">
-                        </div>
-                        <h2>Caractéristiques</h2>
-                        <div class="info-box">
-                            <div class="info-row"><span class="label">Quantité</span> <span>{qty}</span></div>
-                            <div class="info-row"><span class="label">Longueur</span> <span>{L_mm} mm</span></div>
-                            <div class="info-row"><span class="label">Développé</span> <span>{int(dev)} mm</span></div>
-                            <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
-                            <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
-                            <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
-                            <div class="info-row dims-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
-                                <span class="label">Dimensions</span> 
-                                <span class="dims-val">{dim_str_export}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div>
-                        <h2>Visualisation 3D</h2>
-                        <div class="visual-box">
-                            {svg}
-                            <div style="margin-top: 15px; font-size: 12px; color: #999;">Vue filaire indicative</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <h2>Détails de Commande</h2>
-                <table>
-                    <thead><tr><th style="width: 40%;">Libellé</th><th>Valeur</th></tr></thead>
-                    <tbody>
-                        {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
-                    </tbody>
-                </table>
-                <div class="footer">Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>Merci de vérifier les cotes avant validation définitive.</div>
-            </div>
-            <script>
-                // Auto-print removed, purely manual now as per request to remove 'frame'.
-            </script>
-        </body>
-        </html>
-        """
-        st.download_button("📄 Imprimer (PDF)", html_report, f"fiche_{cfg['ref']}.html", "text/html", use_container_width=True)
+        # Legacy HTML Report Removed (Cleaned up)
+        pass
 
 def render_habillage_form():
     """Renders the Sidebar inputs for Habillage and returns the config dict."""
