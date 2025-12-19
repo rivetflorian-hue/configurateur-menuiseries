@@ -2582,7 +2582,20 @@ def generate_svg_v73():
 
 # --- MAIN LAYOUT V3 (Responsive Columns) ---
 
-# 1. Top Navigation & Project Management
+# 1. Logo & Branding
+col_l, col_c, col_r = st.columns([1, 2, 1])
+with col_c:
+    logo_path = os.path.join(ARTIFACT_DIR, "logo_miroiterie.jpg")
+    if os.path.exists(logo_path):
+        st.image(logo_path, use_container_width=True)
+    else:
+        st.error(f"DEBUG: Logo not found at {logo_path}")
+        if os.path.exists(ARTIFACT_DIR):
+             st.info(f"Assets dir contents: {os.listdir(ARTIFACT_DIR)}")
+        else:
+             st.error(f"Assets dir not found at {ARTIFACT_DIR}")
+
+# 2. Top Navigation & Project Management
 render_top_navigation()
 
 # 2. Main Content Columns (Desktop: Config Left / Preview Right)
