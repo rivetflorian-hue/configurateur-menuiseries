@@ -149,77 +149,84 @@ def generate_pdf_report(data_dict, svg_string=None):
         # GLOBAL CRASH CATCHER
         return None, f"{str(e)}" # Return error details
 
-def render_html_template(s, svg_string):
-    """Fallback HTML generation for printing (Compact 1-Page Layout)."""
+def render_html_menuiserie(s, svg_string, logo_b64):
+    """HTML generation for Menuiserie printing (Full Width Bottom Plan)."""
     
     css = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
-        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 10px; font-size: 12px; }
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        
         .page-container { 
             max-width: 210mm; 
             margin: 0 auto; 
-            border: 1px solid #ddd;
             padding: 20px;
-            background: white;
+        }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+
+        /* GRID LAYOUT (TOP SECTION) */
+        .top-section { display: grid; grid-template-columns: 48% 48%; gap: 4%; margin-bottom: 20px; }
+        
+        /* HEADINGS */
+        h3 { 
+            font-size: 14px; color: #2c3e50; margin: 0 0 10px 0; 
+            border-left: 4px solid #3498db; padding-left: 8px; 
+            line-height: 1.2;
         }
         
-        /* Header */
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0056b3; padding-bottom: 10px; margin-bottom: 15px; }
-        .brand h1 { margin: 0; color: #0056b3; font-size: 20px; text-transform: uppercase; }
-        .meta { text-align: right; font-size: 12px; color: #555; }
-        .meta h2 { margin: 0; color: #333; font-size: 22px; }
+        /* PANELS */
+        .panel { background: #f9f9f9; padding: 10px; border-radius: 4px; font-size: 11px; margin-bottom: 5px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #555; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; }
         
-        /* Compact Grid Layout */
-        .top-row { display: flex; gap: 20px; margin-bottom: 15px; }
-        .col-left { flex: 1; }
-        .col-right { flex: 1; }
-        
-        .box { border: 1px solid #eee; padding: 10px; border-radius: 4px; height: 100%; }
-        .box-title { 
-            font-weight: bold; background: #f4f6f9; color: #333; 
-            padding: 5px 10px; margin: -10px -10px 10px -10px; 
-            border-bottom: 1px solid #eee; font-size: 13px;
+        /* ZONES TABLE */
+        table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 5px; }
+        th { background: #cfd8dc; color: #2c3e50; padding: 4px; text-align: left; text-transform: uppercase; font-size: 9px; }
+        td { border-bottom: 1px solid #eee; padding: 4px; color: #444; }
+        tr:nth-child(even) { background-color: #fff; }
+
+        /* BOTTOM SECTION (PLAN) */
+        .visual-box {
+            border: 1px solid #eee; border-radius: 4px; height: 480px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative;
+            width: 100%;
         }
+        /* Allow SVG to take more space */
+        .visual-box svg { max-height: 460px; width: auto; max-width: 95%; }
         
-        .info-table { width: 100%; border-collapse: collapse; }
-        .info-table td { padding: 4px 0; border-bottom: 1px solid #f9f9f9; }
-        .label { font-weight: bold; color: #666; width: 40%; display: inline-block; }
-        
-        /* Zones Table Compact */
-        .zones-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        .zones-table th { background: #0056b3; color: white; padding: 4px; text-align: left; }
-        .zones-table td { border-bottom: 1px solid #eee; padding: 4px; }
-        
-        /* Plan Technique - Compact */
-        .plan-container { 
-            text-align: center; 
-            border: 1px solid #eee; 
-            padding: 10px; 
-            margin-top: 10px;
-            page-break-inside: avoid;
+        .footer { 
+            margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; 
+            font-size: 9px; color: #999; text-align: center; 
         }
-        /* Ensure SVG fits */
-        svg { max-height: 400px; width: auto; max-width: 100%; }
 
         @media print {
-            body { padding: 0; background: white; }
-            .page-container { border: none; padding: 0; margin: 0; }
+            @page { size: A4; margin: 5mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; transform: scale(0.98); transform-origin: top center; }
             .no-print { display: none; }
+            h3 { break-after: avoid; }
         }
     </style>
     """
     
-    # Optional Logo
-    logo_img = ""
-    if LOGO_B64:
-        try:
-            base64.b64decode(LOGO_B64, validate=True)
-            # Bigger logo, no text
-            logo_img = f'<img src="data:image/jpeg;base64,{LOGO_B64}" style="max-height: 80px; margin-right: 0px;">'
-        except: pass
-
-    # Zones Rows
+    # Logo
+    logo_html = f"<h1>Fiche Technique</h1>"
+    if logo_b64:
+        logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
+        
+    # Zones Processing
     flat = flatten_tree(s.get('zone_tree'), 0,0,0,0)
     real = [z for z in flat if z['type'] != 'split']
     sorted_zones = sorted(real, key=lambda z: (z['y'], z['x']))
@@ -229,68 +236,77 @@ def render_html_template(s, svg_string):
         p = z['params']
         remp = p.get('remplissage_global', 'Vitrage')
         extra = f"Ext: {p.get('vitrage_ext','-')} / Int: {p.get('vitrage_int','-')}" if remp == 'Vitrage' else ""
-        z_rows += f"<tr><td>{z['label']}</td><td>{remp}</td><td>{extra}</td></tr>"
+        z_rows += f"<tr><td>{z['label']}</td><td>{p.get('type','-')}</td><td>{remp}</td><td>{extra}</td></tr>"
 
+    # Pre-calc values
+    ref_id = s.get('ref_id', 'F1')
+    import datetime
+    
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>{css}</head>
     <body>
         <div class="page-container">
+            <!-- HEADER -->
             <div class="header">
-                <div style="display:flex; align-items:center;">
-                    {logo_img}
-                    <!-- Text Removed as requested -->
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">Menuiserie {s.get('mat_type', 'PVC')}</div>
                 </div>
-                <div class="meta">
-                    <h2>{s.get('ref_id', 'F1')}</h2>
-                    <div>{s.get('project', {}).get('name', 'P')} | {datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE CHANTIER</div>
+                    <div class="ref">{ref_id}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
                 </div>
             </div>
             
-            <!-- TOP ROW: INFO + ZONES (Side by Side) -->
-            <div class="top-row">
-                <div class="col-left">
-                    <div class="box">
-                        <div class="box-title">1. Informations</div>
-                        <div class="info-table">
-                            <div><span class="label">Repère:</span> {s.get('ref_id', 'F1')}</div>
-                            <div><span class="label">Qté:</span> {s.get('qte_val', 1)}</div>
-                            <div><span class="label">Dim.:</span> {s.get('width_dorm')} x {s.get('height_dorm')} mm</div>
-                            <div><span class="label">Côtes:</span> {s.get('dim_type', 'Tableau')}</div>
-                            <div><span class="label">Mat.:</span> {s.get('mat_type')}</div>
-                            <div><span class="label">Pose:</span> {s.get('pose_type')}</div>
-                            <div><span class="label">Ail.:</span> H/G/D: {s.get('fin_val')} | B: {s.get('fin_bot') if not s.get('same_bot') else s.get('fin_val')} mm</div>
-                            <div><span class="label">Dorm.:</span> {s.get('frame_thig')} mm</div>
-                            <div><span class="label">Coul.:</span> {s.get('col_in')} / {s.get('col_ex')}</div>
-                        </div>
+            <!-- TOP SECTION: INFO + ZONES -->
+            <div class="top-section">
+                <!-- LEFT BLOCK -->
+                <div>
+                    <h3>Informations Générales</h3>
+                    <div class="panel">
+                        <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('qte_val', 1)}</span></div>
+                        <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('width_dorm')} x {s.get('height_dorm')} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Côtes</span> <span class="val">{s.get('dim_type', 'Tableau')}</span></div>
+                        <div class="panel-row"><span class="lbl">Pose</span> <span class="val">{s.get('pose_type')}</span></div>
+                        <div class="panel-row"><span class="lbl">Dormant</span> <span class="val">{s.get('frame_thig')} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Ailettes</span> <span class="val">H/G/D:{s.get('fin_val')} | Bas:{s.get('fin_bot') if not s.get('same_bot') else s.get('fin_val')} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Couleur Int.</span> <span class="val">{s.get('col_in')}</span></div>
+                        <div class="panel-row"><span class="lbl">Couleur Ext.</span> <span class="val">{s.get('col_ex')}</span></div>
                     </div>
                 </div>
                 
-                <div class="col-right">
-                    <div class="box">
-                        <div class="box-title">2. Détails Zones</div>
-                        <table class="zones-table">
-                            <thead><tr><th>Zone</th><th>Rempl.</th><th>Détails</th></tr></thead>
+                <!-- RIGHT BLOCK -->
+                <div>
+                    <h3>Détails des Zones</h3>
+                    <div class="panel">
+                        <table>
+                            <thead><tr><th>Zone</th><th>Ouvrant</th><th>Rempl.</th><th>Détails</th></tr></thead>
                             <tbody>{z_rows}</tbody>
                         </table>
                     </div>
                 </div>
             </div>
             
-            <!-- BOTTOM ROW: PLAN -->
-            <div class="box">
-                <div class="box-title">3. Plan Technique</div>
-                <div class="plan-container">
-                    {svg_string if svg_string else "<i>Schéma non disponible</i>"}
+            <!-- BOTTOM SECTION: PLAN TECHNIQUE -->
+            <div>
+                <h3>Plan Technique</h3>
+                <div class="visual-box">
+                    {svg_string}
+                    <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue extérieure - Cotes tableau en mm</div>
                 </div>
             </div>
             
-            <div style="text-align:center; margin-top:15px; font-size:10px; color:#999;">
-                Miroiterie Yerroise - Document généré automatiquement
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise<br>
+                Merci de vérifier les cotes avant validation définitive.
             </div>
         </div>
-        <script>setTimeout(() => {{ window.print(); }}, 800);</script>
+        <script>
+            setTimeout(() => {{ window.print(); }}, 800);
+        </script>
     </body>
     </html>
     """
@@ -2164,11 +2180,11 @@ def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
         .schema-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
         .visual-box {
-            border: 1px solid #eee; border-radius: 4px; height: 300px;
+            border: 1px solid #eee; border-radius: 4px; height: 280px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             position: relative;
         }
-        .visual-box svg { max-height: 260px; width: auto; max-width: 95%; }
+        .visual-box svg { max-height: 250px; width: auto; max-width: 95%; }
         
         /* TABLE DETAILS */
         table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
@@ -2182,9 +2198,9 @@ def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
         }
 
         @media print {
-            @page { size: A4; margin: 10mm; }
+            @page { size: A4; margin: 5mm; }
             body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
-            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; transform: scale(0.95); transform-origin: top center; }
             .no-print { display: none; }
         }
     </style>
@@ -3177,7 +3193,7 @@ with c_preview:
             if st.button("🖨️ Imprimer", key="btn_print_html_main"):
                 # Pass a unique timestamp to force HTML regeneration
                 s['print_ts'] = datetime.datetime.now().isoformat()
-                html_content = render_html_template(s, svg_output)
+                html_content = render_html_menuiserie(s, svg_output, LOGO_B64)
                 
                 # Append invisible timestamp to force Streamlit component update and re-trigger JS
                 html_content += f"<!-- TS: {s['print_ts']} -->"
