@@ -1042,13 +1042,19 @@ def render_node_ui(node, w_ref, h_ref, level=0, counter=None):
                 st.rerun()
 
             # TRAVERSE THICKNESS (New V22)
-            # Default to Dormant Thickness if not set
-            def_th = st.session_state.get('frame_thig', 70)
+            # Default to 0 to avoid huge gaps (User Feedback: "70mm en trop")
+            # The sash frame itself provides visual thickness.
+            
+            # MIGRATION: If value is 70 (Old Default), force it to 0
+            current_th = int(node.get('traverse_thickness', 0))
+            if current_th == 70:
+                node['traverse_thickness'] = 0
+                
             if 'traverse_thickness' not in node:
-                node['traverse_thickness'] = def_th
+                node['traverse_thickness'] = 0
                 
             node['traverse_thickness'] = st.number_input(
-                "Épaisseur Traverse (mm)", 
+                "Épaisseur Traverse / Meneau (mm)", 
                 min_value=0, max_value=200, value=int(node['traverse_thickness']), step=5,
                 key=f"{prefix}_trav_th"
             )
@@ -2696,22 +2702,24 @@ def render_menuiserie_form():
         qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
 
     # --- SECTION 2 : MATERIAU ---
+    # --- SECTION 2 : MATERIAU ---
+    # --- SECTION 2 : MATERIAU ---
     with st.expander("2. Matériau & Ailettes", expanded=False):
-        mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
+        # 1. PROJET (Left) & MATERIAU (Right)
+        c_m1, c_m2 = st.columns(2)
+        type_projet = c_m1.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
+        mat = c_m2.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
+        # Color Logic
         if mat == "PVC":
-            # liste_ailettes_std removed (unlocked)
             liste_couleurs = ["Blanc (9016)", "Plaxé Chêne", "Plaxé Gris 7016", "Beige"]
         else: 
-            # liste_ailettes_std removed (unlocked)
             liste_couleurs = ["Blanc (9016)", "Gris 7016 Texturé", "Noir 2100 Sablé", "Anodisé Argent"]
 
-        ep_dormant = st.number_input("Épaisseur Dormant (mm)", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
+        st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
 
-        st.write("---")
-        # NOUVEAU : TYPE DE POSE
-        # Remplacement Checkbox par Radio Horizontal (Style PVC/ALU)
-        type_projet = st.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
+        # 2. TYPE DE POSE & DORMANT
+        c_pose1, c_pose2 = st.columns([2, 1])
         
         if type_projet == "Rénovation":
             liste_pose = ["Pose en rénovation (R)", "Pose en rénovation Dépose Totale (RT)"]
@@ -2719,29 +2727,39 @@ def render_menuiserie_form():
             liste_pose = ["Pose en applique avec doublage (A)", "Pose en applique avec embrasures (E)", 
                           "Pose en feuillure (F)", "Pose en tunnel nu intérieur (T)", "Pose en tunnel milieu de mur (TM)"]
         
-        type_pose = st.selectbox("Type de Pose", liste_pose, key="pose_type")
-
-        st.write("---")
+        type_pose = c_pose1.selectbox("Type de Pose", liste_pose, key="pose_type")
+        ep_dormant = c_pose2.number_input("Dormant", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
+        
+        st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
+        
+        # 4. AILETTES & SEUIL (Aligned)
+        # Checkbox ABOVE to allow perfect alignment of inputs
+        bas_identique = st.checkbox("Seuil identique aux ailettes ?", False, key="same_bot")
+        
         c_ail1, c_ail2 = st.columns(2)
-        # Unlocked Ailettes (Default 60mm, Manual Input)
-        ail_val = c_ail1.number_input(f"Ailettes H/G/D (mm)", min_value=0, value=60, step=5, key="fin_val")
-        bas_identique = c_ail2.checkbox("Seuil idem ?", False, key="same_bot")
-        # Default Bas to 0 if separate (Standard threshold)
-        ail_bas = ail_val if bas_identique else c_ail2.number_input(f"Seuil / Bas (mm)", min_value=0, value=0, step=5, key="fin_bot")
-
-        # CONFIG PARTIE BASSE (Seuil)
-        st.write("---")
-        st.markdown("**Partie Basse**")
-        is_appui_rap = st.checkbox("Appui rapporté ?", False, key="is_appui_rap")
-        largeur_appui = 0
+        ail_val = c_ail1.number_input(f"Ailettes (mm)", min_value=0, value=60, step=5, key="fin_val")
+        
+        val_bas_input = 0
+        if not bas_identique:
+             val_bas_input = c_ail2.number_input(f"Seuil (mm)", min_value=0, value=0, step=5, key="fin_bot")
+        else:
+             # Make it look like a disabled input or just text aligned
+             # Using disabled input is better for visual alignment
+             c_ail2.number_input(f"Seuil (mm)", value=ail_val, disabled=True, key="fin_bot_disabled")
+             
+        # 5. APPUI
+        # Condensed & Centered: 15px Top push, 0px Bottom manual margin (relies on widget padding)
+        st.markdown("<hr style='margin:10px 0 15px 0'>", unsafe_allow_html=True)
+        
+        # Left Aligned
+        is_appui_rap = st.checkbox("Appui Rapporté ?", False, key="is_appui_rap")
+        
         if is_appui_rap:
             largeur_appui = st.number_input("Largeur Appui (mm)", 0, 500, 100, step=10, key="width_appui")
-            txt_partie_basse = f"Appui Rapporté (Largeur {largeur_appui}mm)"
-        else:
-            txt_partie_basse = "Bavette 100x100 mm"
-            st.caption("Défaut : Bavette 100x100 mm")
-
-        st.write("---")
+        
+        # 6. COULEURS
+        # Pull bottom line closer
+        st.markdown("<hr style='margin:0px 0 10px 0'>", unsafe_allow_html=True)
         cc1, cc2 = st.columns(2)
         col_int = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in")
         col_ext = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
@@ -2852,6 +2870,45 @@ def render_menuiserie_form():
 
 # --- 3. GÉNÉRATEUR SVG FINAL ---
 def generate_svg_v73():
+    # RETRIEVE VARIABLES FROM SESSION STATE (Fix NameError)
+    # Must match keys used in Sidebar
+    
+    # 1. Basic Dimensions
+    l_dos_dormant = st.session_state.get('width_dorm', 1200)
+    h_dos_dormant = st.session_state.get('height_dorm', 1400)
+    
+    # 2. Options
+    vr_opt = st.session_state.get('vr_enable', False)
+    h_vr = st.session_state.get('vr_h', 185) if vr_opt else 0
+    vr_grille = st.session_state.get('vr_g', False)
+    
+    h_menuiserie = h_dos_dormant - h_vr
+    
+    # 3. Ailettes & Dormant
+    ep_dormant = st.session_state.get('frame_thig', 70)
+    ail_val = st.session_state.get('fin_val', 60)
+    
+    same_bot = st.session_state.get('same_bot', False)
+    # Logic from Sidebar: if same, use ail_val, else use fin_bot input
+    if same_bot: ail_bas = ail_val
+    else: ail_bas = st.session_state.get('fin_bot', 0)
+    
+    # 4. Colors
+    col_int = st.session_state.get('col_in', 'Blanc')
+    # Config Global
+    color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
+    hex_col = "#FFFFFF"
+    for k, v in color_map.items():
+        if k in col_int: hex_col = v
+        
+    cfg_global = {
+        'color_frame': hex_col,
+        'color_glass': "#d6eaff"
+    }
+
+    # 5. Zones
+    zones_config = flatten_tree(st.session_state.get('zone_tree', init_node('root')), 0, 0, l_dos_dormant, h_menuiserie)
+    
     svg = []
     col_fin = "#D3D3D3"
     
@@ -3144,88 +3201,74 @@ with c_preview:
         config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
         sorted_zones = sorted(config_display, key=lambda z: z['id'])
 
-        # Nested columns for Recap
-        c_recap_l, c_recap_r = st.columns([1, 1])
+        # STACKED DISPLAY (Vertical) - No Columns
+        
+        # --- INFO GENERALES ---
+        st.subheader("Info. Générales")
+        s = st.session_state
+        
+        if s.get('is_appui_rap', False):
+            pb_txt = f"Appui Rapp. ({s.get('width_appui', 0)}mm)"
+        else:
+            pb_txt = "Bavette 100x100"
+            
+        # Helper for metrics
+        def kpi(label, value):
+            st.markdown(f"**{label}** : {value}")
 
-        with c_recap_l:
-            st.subheader("Info. Générales")
+        ci1, ci2 = st.columns(2)
+        with ci1:
+            kpi("Repère", s.get('ref_id', 'F1'))
+            kpi("Quantité", s.get('qte_val', 1))
+            kpi("Dimensions", f"{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)}")
+            kpi("Type Côtes", s.get('dim_type', 'Tableau'))
+            kpi("Matériau", s.get('mat_type', 'PVC'))
             
-            s = st.session_state
-            
-            if s.get('is_appui_rap', False):
-                pb_txt = f"Appui Rapp. ({s.get('width_appui', 0)}mm)"
-            else:
-                pb_txt = "Bavette 100x100"
-                
-            vr_txt = "Oui" if s.get('vr_enable', False) else "Non"
+        with ci2:
+            # Remove truncation for full name
+            kpi("Pose", s.get('pose_type', '-'))
+            # Ailettes formatting
             h_ail = s.get('fin_val', 0)
             b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
-            ailes_txt = f"H/G/D:{h_ail} B:{b_ail}"
+            kpi("Ailettes", f"H/G/D: {h_ail}mm | Bas: {b_ail}mm")
+            kpi("Dormant", f"{s.get('frame_thig', 70)} mm")
+            kpi("Couleurs", f"Int: {s.get('col_in','-')} / Ext: {s.get('col_ex','-')}")
 
-            # --- UI INFO GÉNÉRALES (Refactored V23) ---
-            st.markdown("#### 📝 Synthèse")
-            
-            # Helper for metrics
-            def kpi(label, value):
-                st.markdown(f"**{label}** : {value}")
-
-            ci1, ci2 = st.columns(2)
-            with ci1:
-                kpi("Repère", s.get('ref_id', 'F1'))
-                kpi("Quantité", s.get('qte_val', 1))
-                kpi("Dimensions", f"{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)}")
-                kpi("Type Côtes", s.get('dim_type', 'Tableau'))
-                kpi("Matériau", s.get('mat_type', 'PVC'))
-                
-            with ci2:
-                kpi("Pose", s.get('pose_type', '-')[:20]+"..")
-                # Ailettes formatting
-                h_ail = s.get('fin_val', 0)
-                b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
-                kpi("Ailettes", f"H/G/D: {h_ail}mm | Bas: {b_ail}mm")
-                kpi("Dormant", f"{s.get('frame_thig', 70)} mm")
-                kpi("Couleurs", f"Int: {s.get('col_in','-')} / Ext: {s.get('col_ex','-')}") # Fix <br>
-            
-            # --- EXPORT / PRODUCTION ---
-            st.markdown("---")
-            
-            # Button for Printing (HTML Fallback only)
-            if st.button("🖨️ Imprimer", key="btn_print_html_main"):
-                # Pass a unique timestamp to force HTML regeneration
-                s['print_ts'] = datetime.datetime.now().isoformat()
-                html_content = render_html_menuiserie(s, svg_output, LOGO_B64)
-                
-                # Append invisible timestamp to force Streamlit component update and re-trigger JS
-                html_content += f"<!-- TS: {s['print_ts']} -->"
-                
-                import streamlit.components.v1 as components
-                # Height 0 to be invisible, but content triggers JS
-                components.html(html_content, height=0, width=0)
-                st.info(f"Impression lancée... ({s['print_ts'].split('T')[1][:8]})")
-            
-            # 2. Zones Details
-            # CLEANUP: Removed legacy menuiserie_html construction that caused NameError
-            pass
-
-            
-
-
-
-# Use the function - RESTORED HTML FALLBACK
-            # Legacy PDF logic removed (Button duplicated in original code)
-            pass
-
-
-        with c_recap_r:
-            st.subheader("Détail Zones")
+        st.markdown("---")
+        
+        # --- DETAIL ZONES ---
+        st.subheader("Détail Zones")
+        
+        # Container with slight background
+        with st.container():
             for z in sorted_zones:
-                with st.expander(f"{z['label']} : {z['type']}", expanded=True):
-                    remp_global = z['params'].get('remplissage_global', 'Vitrage')
-                    st.write(f"**Remp:** {remp_global}")
-                    if remp_global == "Vitrage":
-                        st.caption(f"Ex:{z['params'].get('vitrage_ext')} / In:{z['params'].get('vitrage_int')}")
-                    if z['params'].get('grille_aera'):
-                        st.caption(f"Grille: {z['params'].get('pos_grille')}")
+                remp_global = z['params'].get('remplissage_global', 'Vitrage')
+                extra_info = ""
+                if remp_global == "Vitrage":
+                    extra_info = f" | {z['params'].get('vitrage_ext')} / {z['params'].get('vitrage_int')}"
+                
+                grille_info = ""
+                if z['params'].get('pos_grille') and z['params'].get('pos_grille') != "Aucune":
+                    grille_info = f" | 💨 {z['params'].get('pos_grille')}"
+
+                # One line per zone
+                st.markdown(f"🔹 **{z['label']} ({z['type']})** : {remp_global}{extra_info}{grille_info}")
+                
+        st.markdown("---")
+        
+        # Button for Printing
+        if st.button("🖨️ Imprimer", key="btn_print_html_main"):
+            # Pass a unique timestamp to force HTML regeneration
+            s['print_ts'] = datetime.datetime.now().isoformat()
+            html_content = render_html_menuiserie(s, svg_output, LOGO_B64)
+            
+            # Append invisible timestamp to force Streamlit component update and re-trigger JS
+            html_content += f"<!-- TS: {s['print_ts']} -->"
+            
+            import streamlit.components.v1 as components
+            # Height 0 to be invisible, but content triggers JS
+            components.html(html_content, height=0, width=0)
+            st.info(f"Impression lancée... ({s['print_ts'].split('T')[1][:8]})")
 
     else:
         # HABILLAGE PREVIEW
