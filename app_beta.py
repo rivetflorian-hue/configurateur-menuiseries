@@ -617,7 +617,7 @@ def render_top_navigation():
     
     with c_mode:
         # MODE SWITCH
-        nav_options = ["Menuiserie", "Habillage"]
+        nav_options = ["Menuiserie", "Habillage", "Volet Roulant"]
         current_mode = st.session_state.get('mode_module', 'Menuiserie')
         
         # Ensure valid
@@ -702,9 +702,15 @@ def render_top_navigation():
                      if cc_yes.button("✅ OUI", use_container_width=True, key="btn_yes"):
                          target = next((c for c in configs if c['id'] == target_id), None)
                          if current_action == 'open' and target:
-                             deserialize_config(target['data'])
+                             keys_to_clear = [k for k in st.session_state.keys() if k.startswith(("vr_", "men_", "hab_", "active_reference", "vr_ref_in"))]
+                             for k in keys_to_clear: del st.session_state[k]
+                             
+                             deserialize_config(target["data"])
                              st.session_state['active_config_id'] = target['id']
                              st.session_state['ref_id'] = target['ref']
+                             # FIX: Explicitly set widget key to match loaded ref
+                             st.session_state['vr_ref_in'] = target['ref']
+                             
                              st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie')
                              st.toast(f"Ouverture de '{target['ref']}'...")
                              clear_confirm()
@@ -3314,6 +3320,533 @@ def generate_svg_v73():
 
 
 # ==============================================================================
+# --- MODULE VOLET ROULANT (NOUVEAU) ---
+# ==============================================================================
+
+def render_volet_form():
+    """Formulaire de configuration Volet Roulant"""
+    s = st.session_state
+    
+    st.markdown("##### ⚙️ Configuration")
+
+    # 1. Header: Repère et Quantité (Matching Menuiserie Style)
+    # Silent Defaults
+    s['vr_mat'] = "Aluminium" 
+
+    with st.expander("📝 Repère et quantité", expanded=True):
+        c_ref, c_qte = st.columns([3, 1])
+        with c_ref:
+            # Repère editable
+            curr_ref = s.get('ref_id', 'VR-01')
+            new_ref_in = st.text_input("Repère", value=curr_ref, key="vr_ref_in")
+            if new_ref_in != curr_ref:
+                s['ref_id'] = new_ref_in
+        with c_qte:
+             s['vr_qte'] = st.number_input("Qté", value=s.get('vr_qte', 1), min_value=1, step=1, key="vr_qte_in")
+
+    # 2. Dimensions
+    with st.expander("📐 Dimensions", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            s['vr_dim_type'] = st.selectbox("Type de côtes", ["Côtes Tableau", "Côtes dos de coulisses"], index=0 if s.get('vr_dim_type') == "Côtes Tableau" else 1, key="vr_dim_sel")
+        
+        c_w, c_h = st.columns(2)
+        with c_w:
+            s['vr_width'] = st.number_input("Largeur (mm)", value=s.get('vr_width', 1000), step=10, key="vr_w_in")
+        with c_h:
+            s['vr_height'] = st.number_input("Hauteur (mm)", value=s.get('vr_height', 1000), step=10, key="vr_h_in")
+            
+        # Qte moved to header
+    
+    # 3. Couleurs (Nouveau)
+    col_opts = ["Blanc 9010", "Gris Anthracite 7016", "Gris Clair 7035", "Noir 2100", "Ivoire 1015", "Chêne Doré", "Autre (RAL)"]
+    
+    with st.expander("🎨 Couleurs", expanded=False):
+        # Helper to render color select + input
+        def color_picker(label, key_prefix):
+            c_sel = st.selectbox(label, col_opts, index=0, key=f"{key_prefix}_sel")
+            if c_sel == "Autre (RAL)":
+                c_ral = st.text_input(f"RAL {label}", value="", key=f"{key_prefix}_ral")
+                return f"RAL {c_ral}" if c_ral else "RAL ?"
+            return c_sel
+
+        c_col1, c_col2 = st.columns(2)
+        with c_col1:
+            s['vr_col_coffre'] = color_picker("Couleur Coffre", "vr_c_coffre")
+            s['vr_col_coulisses'] = color_picker("Couleur Coulisses", "vr_c_coul")
+        with c_col2:
+            s['vr_col_tablier'] = color_picker("Couleur Tablier", "vr_c_tab")
+            s['vr_col_lame_fin'] = color_picker("Couleur Lame Finale", "vr_c_lame")
+
+    # 4. Manoeuvre
+    with st.expander("🎮 Manoeuvre / Motorisation", expanded=False):
+        mech = st.radio("Type", ["Manuel", "Motorisé"], horizontal=True, index=0 if s.get('vr_type') == "Manuel" else 1, key="vr_mech_in")
+        s['vr_type'] = mech
+        
+        if mech == "Manuel":
+            s['vr_motor'] = None
+            c_man1, c_man2 = st.columns(2)
+            with c_man1:
+                s['vr_crank_side'] = st.radio("Sortie Manivelle", ["Droite", "Gauche"], horizontal=True, index=0 if s.get('vr_crank_side') == "Droite" else 1, key="vr_crank_side_in")
+            with c_man2:
+                s['vr_crank_len'] = st.text_input("Longueur Manivelle (mm)", value=s.get('vr_crank_len', "1200"), key="vr_crank_len_in")
+
+        else: # Motorisé
+            c_m1, c_m2 = st.columns(2)
+            with c_m1:
+                mot = st.selectbox("Marque", ["SOMFY", "SIMU"], index=0 if s.get('vr_motor') == "SOMFY" else 1, key="vr_mot_in")
+                s['vr_motor'] = mot
+                
+                # Protocol (IO/RTS/Filaire + IO SOLAIRE)
+                proto = st.selectbox("Protocole", ["IO", "RTS", "Filaire", "IO SOLAIRE"], index=0, key="vr_proto_in")
+                s['vr_proto'] = proto
+                
+            with c_m2:
+                # Power (Nm)
+                power = st.selectbox("Puissance", ["10 Nm", "20 Nm", "30 Nm", "40 Nm", "50 Nm"], index=0, key="vr_power_in")
+                s['vr_power'] = power
+            
+            st.write("---")
+            c_c1, c_c2 = st.columns(2)
+            with c_c1:
+                # Cable Side (Swapped: Gauche / Droite as requested for visual match)
+                s['vr_cable_side'] = st.radio("Sortie de fil", ["Gauche", "Droite"], horizontal=True, index=0 if s.get('vr_cable_side') == "Gauche" else 1, key="vr_cable_side_in")
+            with c_c2:
+                # Cable Length (5ML, 10ML, Other)
+                c_len = st.selectbox("Longueur Câble", ["5 ML (Standard)", "10 ML", "Autre"], index=0, key="vr_cable_len_in")
+                if c_len == "Autre":
+                    s['vr_cable_len'] = st.text_input("Préciser longueur", key="vr_cable_len_custom")
+                else:
+                    s['vr_cable_len'] = c_len
+
+
+    # 5. Gestion / Sauvegarde (Actions Style Menuiserie)
+    st.markdown("### 💾 Actions")
+    
+    active_id = s.get('active_config_id')
+    curr_ref = s.get('ref_id', 'VR-01')
+    
+    if active_id:
+        st.caption(f"✏️ Édition en cours : {curr_ref}")
+    
+    # Logic to Add/Save
+    def get_next_ref():
+        configs = s.get('project', {}).get('configs', [])
+        max_n = 0
+        for c in configs:
+            import re
+            m = re.search(r'\d+', c.get('ref', ''))
+            if m:
+                n = int(m.group(0))
+                if n > max_n: max_n = n
+        return f"VR-{max_n + 1:02d}"
+
+    def prepare_data():
+        vr_data = {k: v for k, v in s.items() if k.startswith('vr_')}
+        vr_data['mode_module'] = 'Volet Roulant' 
+        # Fix VR-XX: Prefer widget input, then session ref, then calc new one
+        vr_data['ref_id'] = s.get('vr_ref_in', s.get('ref_id', get_next_ref()))
+        return vr_data
+
+    # Layout: 3 Columns, Col 0 only if Active
+    c_btn0, c_btn1, c_btn2 = st.columns(3)
+
+    # 1. UPDATE (Mettre à jour) - Only if editing existing
+    if active_id:
+        if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
+            # Update Logic
+            configs = s.get('project', {}).get('configs', [])
+            target_idx = next((i for i, c in enumerate(configs) if c['id'] == active_id), -1)
+            
+            if target_idx >= 0:
+                data = prepare_data()
+                configs[target_idx]['data'] = data
+                configs[target_idx]['ref'] = data['ref_id']
+                # Sync session ref
+                s['ref_id'] = data['ref_id']
+                st.toast(f"✅ {data['ref_id']} mis à jour !")
+                st.rerun()
+            else:
+                st.error("Erreur: Configuration introuvable pour mise à jour.")
+
+    # 2. Ajouter & Dupliquer
+    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, help="Enregistrer une copie"):
+        import uuid
+        new_id = str(uuid.uuid4())
+        new_ref = get_next_ref()
+        
+        data = prepare_data()
+        data['ref_id'] = new_ref # Force new ref
+        
+        new_config = {
+            'id': new_id,
+            'ref': new_ref,
+            'data': data,
+            'config_type': 'Volet Roulant'
+        }
+        
+        if 'project' not in s: s['project'] = {'configs': []}
+        s['project']['configs'].append(new_config)
+        
+        # Switch to new duplicate
+        s['active_config_id'] = new_id
+        s['ref_id'] = new_ref
+        
+        st.toast(f"✅ {new_ref} ajouté (Copie) !")
+        st.rerun()
+            
+    # 3. Ajouter & Nouveau (Reset)
+    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, help="Sauvegarder et remet à zéro"):
+        import uuid
+        new_id = str(uuid.uuid4())
+        new_ref = get_next_ref()
+        
+        data = prepare_data()
+        data['ref_id'] = new_ref
+        
+        new_config = {
+            'id': new_id,
+            'ref': new_ref,
+            'data': data,
+            'config_type': 'Volet Roulant'
+        }
+        
+        if 'project' not in s: s['project'] = {'configs': []}
+        s['project']['configs'].append(new_config)
+        
+        st.toast(f"✅ {new_ref} ajouté !")
+        
+        # RESET Form - ROBUST CLEANUP
+        # 1. Delete all vr_ keys from session_state (including widgets)
+        keys_to_reset = [k for k in s.keys() if k.startswith('vr_')]
+        for k in keys_to_reset:
+             del s[k]
+        
+        # 2. Explicitly Re-init Defaults in Session State AND Widget Keys
+        # This ensures that when widgets re-mount, they see these default values
+        
+        # Keys for widgets
+        s['vr_w_in'] = 1000
+        s['vr_h_in'] = 1000
+        s['vr_qte_in'] = 1
+        s['vr_ref_in'] = get_next_ref()
+        
+        # Keys for logic
+        s['vr_mat'] = "Aluminium"
+        s['vr_width'] = 1000
+        s['vr_height'] = 1000
+        s['vr_qte'] = 1
+        s['ref_id'] = s['vr_ref_in']
+        s['active_config_id'] = None
+        s['vr_cable_side'] = "Gauche"
+        s['vr_cable_side_in'] = "Gauche"
+        s['vr_cable_len'] = "5 ML (Standard)"
+            
+        st.rerun()
+
+    return s
+
+def generate_svg_volet():
+    """Génère le dessin SVG simplifié du Volet Roulant"""
+    s = st.session_state
+    w = s.get('vr_width', 1000)
+    h = s.get('vr_height', 1000)
+    
+    # Scale factors
+    scale = 0.3
+    dw = w * scale
+    dh = h * scale
+    
+    coffre_h = 150 * scale # Box height visual
+    coulisse_w = 40 * scale # Guide width visual
+    
+    # ViewBox
+    # Increased margin to avoid clipping Crank Dimensions (User report: "hors cadre")
+    margin = 80
+    vb_w = dw + (2 * margin)
+    vb_h = dh + (2 * margin)
+    
+    # Helper for Color Mapping
+    def get_color_hex(c_name, default="#e0e0e0"):
+        if not c_name or c_name == "-": return default
+        c_map = {
+            "Blanc 9010": "#ffffff",
+            "Gris Anthracite 7016": "#383e42",
+            "Gris Clair 7035": "#d7d7d7",
+            "Noir 2100": "#1a1a1a",
+            "Ivoire 1015": "#e6d690",
+            "Chêne Doré": "#b08d55",
+            # Fallback for RALs
+        }
+        return c_map.get(c_name, default)
+
+    # Styles with dynamic colors
+    fill_coffre = get_color_hex(s.get('vr_col_coffre'), "#e0e0e0")
+    fill_tablier = get_color_hex(s.get('vr_col_tablier'), "#f0f8ff")
+    fill_coulisse = get_color_hex(s.get('vr_col_coulisses'), "#ffffff")
+    stroke_lame = get_color_hex(s.get('vr_col_lame_fin'), "#bcd") if s.get('vr_col_lame_fin') != "Autre (RAL)" else "#bcd" # Simple fallback
+    
+    style_coffre = f"fill:{fill_coffre}; stroke:#666; stroke-width:2;"
+    style_tablier = f"fill:{fill_tablier}; stroke:#ccc; stroke-width:1;"
+    style_lame = "stroke:#bcd; stroke-width:1;" # Internal slats
+    style_coulisse = f"fill:{fill_coulisse}; stroke:#888; stroke-width:1;"
+    
+    # Draw
+    svg = f'<g transform="translate({margin},{margin})">'
+    
+    # 1. Tablier (Curtain)
+    svg += f'<rect x="{coulisse_w}" y="{coffre_h}" width="{dw - (2*coulisse_w)}" height="{dh - coffre_h}" style="{style_tablier}" />'
+    
+    # Horizontal Slats Lines
+    slat_h = 10 * scale
+    curr_y = coffre_h + slat_h
+    while curr_y < dh - (20 * scale): # Leave room for bottom slat
+        svg += f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />'
+        curr_y += slat_h
+        
+    # Lame Finale (Bottom Slat) - colorized
+    svg += f'<rect x="{coulisse_w}" y="{dh - (20*scale)}" width="{dw - (2*coulisse_w)}" height="{20*scale}" fill="{get_color_hex(s.get("vr_col_lame_fin"), "#bcd")}" stroke="#888" />'
+
+    # 2. Coulisses (Guides)
+    svg += f'<rect x="0" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Left
+    svg += f'<rect x="{dw - coulisse_w}" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Right
+    
+    # 3. Coffre (Box)
+    svg += f'<rect x="0" y="0" width="{dw}" height="{coffre_h}" style="{style_coffre}" />'
+    
+    # Solar Panel Visual (If IO SOLAIRE)
+    if s.get('vr_proto') == "IO SOLAIRE":
+        # Draw small dark blue rect
+        # Position right side unless manual override logic added later
+        side = s.get('vr_cable_side', 'Droite')
+        sp_w = 100 * scale # Solar Panel Width
+        sp_h = 40 * scale
+        sp_y = (coffre_h - sp_h) / 2
+        sp_x = (dw - sp_w - (20*scale)) if side == "Droite" else (20*scale)
+        
+        svg += f'<rect x="{sp_x}" y="{sp_y}" width="{sp_w}" height="{sp_h}" fill="#2c3e50" stroke="#111" />'
+        # Grid lines for solar look
+        svg += f'<line x1="{sp_x + sp_w/2}" y1="{sp_y}" x2="{sp_x + sp_w/2}" y2="{sp_y+sp_h}" stroke="#555" />'
+
+    # Cable Exit Visual (Motor only)
+    if s.get('vr_type') == "Motorisé":
+        side = s.get('vr_cable_side', 'Droite')
+        cx = dw if side == "Droite" else 0
+        cy = coffre_h / 2
+        
+        # Draw a little "squiggly" cable
+        d_cable = f"M{cx},{cy} Q{cx+15},{cy} {cx+15},{cy+15} T{cx+15},{cy+30}" if side == "Droite" else f"M{cx},{cy} Q{cx-15},{cy} {cx-15},{cy+15} T{cx-15},{cy+30}"
+        svg += f'<path d="{d_cable}" stroke="orange" stroke-width="3" fill="none" />'
+        svg += f'<circle cx="{cx}" cy="{cy}" r="3" fill="orange" />'
+        
+    # Crank Visual (Manual only)
+    if s.get('vr_type') == "Manuel":
+        side = s.get('vr_crank_side', 'Droite')
+        
+        # Position: Offset from guide rail
+        # Guide rail width is coulisse_w
+        # We want it strictly "le long de la coulisse"
+        # Let's put it overlapping the guide slightly or just inside
+        offset = 15 * scale if side == "Droite" else -15 * scale
+        cx = (dw - (coulisse_w/2)) if side == "Droite" else (coulisse_w/2)
+        
+        # Start from bottom of box
+        cy_top = coffre_h
+        # Parse length
+        try:
+            l_mm = int(s.get('vr_crank_len', '1200'))
+        except:
+            l_mm = 1200
+        
+        # Scale length (visual only, cap it if too long for view?)
+        # Let's use a proportional visual length or just fixed visual logic?
+        # User wants "sa longueur aussi sur le plan" as a dimension. 
+        # Visualization should probably reflect ratio if possible, but let's stick to a reasonable visual representation.
+        l_vis = l_mm * scale
+        cy_bot = cy_top + l_vis
+        
+        # 1. The Crank Rod (Refined: Grey, Thinner but Visible)
+        # Shift slightly outside/inside depending on side to not hide guide totally? 
+        # Let's place it aligned with the outer edge of the guide.
+        rod_x = (dw - 5) if side == "Droite" else 5
+        
+        # Outer Border (Dark Grey for contrast, slightly thicker)
+        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
+        svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
+        
+        # Inner Core (Light Grey/White, thinner)
+        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
+        svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
+
+        # 2. Dimension Line for Crank
+        # Offset further out to avoid clash with guide/crank
+        dim_x = rod_x + (50 if side == "Droite" else -50)
+        
+        # Main line
+        svg += f'<line x1="{dim_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_bot}" stroke="#444" stroke-width="1" />'
+        
+        # Arrow heads
+        # Top (^)
+        svg += f'<path d="M{dim_x-3},{cy_top+5} L{dim_x},{cy_top} L{dim_x+3},{cy_top+5}" fill="none" stroke="#444" />'
+        # Bottom (v)
+        svg += f'<path d="M{dim_x-3},{cy_bot-5} L{dim_x},{cy_bot} L{dim_x+3},{cy_bot-5}" fill="none" stroke="#444" />'
+        
+        # Text Label
+        # Rotate text against the line
+        text_x = dim_x + (15 if side == "Droite" else -15)
+        text_y = cy_top + (l_vis / 2)
+        # Check for collision with bottom measure if rod is long
+        svg += f'<text x="{text_x}" y="{text_y}" text-anchor="middle" transform="rotate(-90, {text_x}, {text_y})" font-family="sans-serif" font-size="10" fill="#444">{l_mm}</text>'
+        
+        # Dashed projection lines (Top only, bottom is obvious)
+        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_top}" stroke="#ccc" stroke-dasharray="2,2" />'
+
+    # Box X cross
+    svg += f'<line x1="0" y1="0" x2="{dw}" y2="{coffre_h}" stroke="#ccc" />'
+    svg += f'<line x1="0" y1="{coffre_h}" x2="{dw}" y2="0" stroke="#ccc" />'
+    
+    # 4. Dimensions Arrows (FIXED)
+    # Width (Bottom)
+    svg += f'<line x1="0" y1="{dh + 20}" x2="{dw}" y2="{dh + 20}" stroke="black" />' # Main line
+    # Left Arrow (<)
+    svg += f'<path d="M10,{dh+15} L0,{dh+20} L10,{dh+25}" fill="none" stroke="black" />'
+    # Right Arrow (>)
+    svg += f'<path d="M{dw-10},{dh+15} L{dw},{dh+20} L{dw-10},{dh+25}" fill="none" stroke="black" />'
+    
+    svg += f'<text x="{dw/2}" y="{dh + 40}" text-anchor="middle" font-family="sans-serif" font-size="12">{int(w)} mm</text>'
+    
+    # Height (Left)
+    svg += f'<line x1="{-20}" y1="0" x2="{-20}" y2="{dh}" stroke="black" />'
+    # Top Arrow (^)
+    svg += f'<path d="M{-25},10 L{-20},0 L{-15},10" fill="none" stroke="black" />'
+    # Bottom Arrow (v)
+    svg += f'<path d="M{-25},{dh-10} L{-20},{dh} L{-15},{dh-10}" fill="none" stroke="black" />'
+    
+    svg += f'<text x="{-30}" y="{dh/2}" text-anchor="middle" transform="rotate(-90, {-30}, {dh/2})" font-family="sans-serif" font-size="12">{int(h)} mm</text>'
+    
+    svg += '</g>'
+    
+    # Remove old marker defs since we draw manually
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{svg}</svg>'
+
+def render_html_volet(s, svg_string, logo_b64):
+    """Génération HTML pour Volet Roulant"""
+    
+    css = """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        .page-container { max-width: 210mm; margin: 0 auto; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+        
+        .section-block { margin-bottom: 25px; break-inside: avoid; }
+        h3 { font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; border-left: 5px solid #3498db; padding-left: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dotted #ccc; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; }
+        
+        .visual-box { border: 1px solid #eee; margin-top: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; width: 100%; height: 600px; }
+        .visual-box svg { height: 90%; width: auto; max-width: 95%; }
+        
+        .footer { position: fixed; bottom: 10mm; left: 0; right: 0; font-size: 9px; color: #999; text-align: center; }
+
+        @media print {
+            @page { size: A4; margin: 12mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
+            h3 { break-after: avoid; }
+            .page-break { page-break-before: always; padding-top: 30px; }
+        }
+    </style>
+    """
+    
+    # Logo
+    logo_html = "<h1>Fiche Technique</h1>"
+    if logo_b64:
+        logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
+    
+    ref_id = s.get('ref_id', 'VR-01')
+    import datetime
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>{css}</head>
+    <body>
+        <div class="page-container">
+            <!-- HEADER -->
+            <div class="header">
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">Volet Roulant {s.get('vr_mat', 'Aluminium')}</div>
+                </div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE CHANTIER</div>
+                    <div class="ref">{ref_id}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
+            </div>
+            
+            <!-- INFORMATIONS -->
+            <div class="section-block">
+                <h3>Informations Générales</h3>
+                <div class="panel">
+                    <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
+                    <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('vr_qte', 1)}</span></div>
+                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('vr_mat', 'Aluminium')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('vr_width')} x {s.get('vr_height')} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Type Côtes</span> <span class="val">{s.get('vr_dim_type')}</span></div>
+                    
+                    <!-- Motorisation Détaillée -->
+                    <div class="panel-row"><span class="lbl">Manoeuvre</span> <span class="val">{s.get('vr_type')}</span></div>
+                    
+                    {f'<div class="panel-row"><span class="lbl">Sortie Manivelle</span> <span class="val">{s.get("vr_crank_side", "Droite")} / {s.get("vr_crank_len", 1200)}mm</span></div>' if s.get('vr_type') == "Manuel" else ''}
+
+                    {f'<div class="panel-row"><span class="lbl">Motorisation</span> <span class="val">{s.get("vr_motor")} ({s.get("vr_proto", "-")} / {s.get("vr_power", "-")})</span></div>' if s.get('vr_type') == "Motorisé" else ''}
+
+                    <!-- Sortie de Fil -->
+                    {f'<div class="panel-row"><span class="lbl">Sortie de Fil</span> <span class="val">{s.get("vr_cable_side", "Droite")} / {s.get("vr_cable_len", "5 ML")}</span></div>' if s.get('vr_type') == "Motorisé" else ''}
+                    
+                    <!-- Solaire -->
+                    {f'<div class="panel-row"><span class="lbl">Option Solaire</span> <span class="val">OUI (Panneau sur Coffre)</span></div>' if s.get('vr_proto') == "IO SOLAIRE" else ''}
+
+                    <!-- Couleurs -->
+                    <div style="margin-top:10px; border-top:1px solid #eee; padding-top:5px;">
+                        <div class="panel-row"><span class="lbl">Coffre</span> <span class="val">{s.get('vr_col_coffre', '-')}</span></div>
+                        <div class="panel-row"><span class="lbl">Coulisses</span> <span class="val">{s.get('vr_col_coulisses', '-')}</span></div>
+                        <div class="panel-row"><span class="lbl">Tablier</span> <span class="val">{s.get('vr_col_tablier', '-')}</span></div>
+                        <div class="panel-row"><span class="lbl">Lame Finale</span> <span class="val">{s.get('vr_col_lame_fin', '-')}</span></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- PLAN -->
+            <div class="section-block">
+                <h3>Schéma Technique</h3>
+                <div class="visual-box">
+                    {svg_string}
+                    <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue Extérieure - {s.get('vr_dim_type')}</div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
 # --- MODULE HABILLAGE (INTÉGRÉ) ---
 # ==============================================================================
 
@@ -3375,6 +3908,9 @@ with c_config:
     if current_mode == 'Menuiserie':
         st.markdown("### 🛠 Options Menuiserie")
         render_menuiserie_form()
+    elif current_mode == 'Volet Roulant':
+        st.markdown("### 🧱 Options Volet Roulant")
+        vr_config = render_volet_form()
     else:
         st.markdown("### 🧱 Options Habillage")
         hab_config = render_habillage_form()
@@ -3383,11 +3919,12 @@ with c_config:
 with c_preview:
     st.markdown("### 👁️ Visualisation")
     
+
+
     if current_mode == 'Menuiserie':
         # 1. PLAN TECHNIQUE
         try:
             svg_output = generate_svg_v73()
-            # Use container width for SVG
             st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Erreur SVG: {e}")
@@ -3397,138 +3934,103 @@ with c_preview:
         # 2. RÉCAPITULATIF SOUS LE DESSIN
         st.markdown("### 📋 Fiche Technique")
         st.markdown("---")
+        
+        # Bouton Impression
+        if st.button("🖨️ Impression Fiche Technique", use_container_width=True):
+            html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+            from streamlit.components.v1 import html
+            html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
 
-        # PREPARE ZONES DATA (moved up for use in recap)
+        # PREPARE ZONES DATA
         config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
         sorted_zones = sorted(config_display, key=lambda z: z['id'])
-        s = st.session_state # Ensure s is defined
+        s = st.session_state
 
-        # Define w_d and h_d for calculations
         w_d = s.get('width_dorm', 0)
         h_d = s.get('height_dorm', 0)
 
-        # --- SECTION 1: INFORMATIONS GLOBALES (Strict Schema) ---
+        # --- SECTION 1: INFORMATIONS GLOBALES ---
         c1, c2 = st.columns(2)
-        
-        # Calculate Dimensions
         w_rec = w_d + (2 * s.get('fin_val', 0))
-        # Recouvrement Height: Fab + Ailette Top + Bottom Piece (Appui or Aillette)
         h_bot_add = s.get('width_appui', 0) if s.get('is_appui_rap', False) else (s.get('fin_bot', 0) if not s.get('same_bot', False) else s.get('fin_val', 0))
         h_rec = h_d + s.get('fin_val', 0) + h_bot_add
-
+        
         with c1:
             st.markdown(f"**Repère** : {s.get('ref_id', 'F1')}")
             st.markdown(f"**Quantité** : {s.get('qte_val', 1)}")
-            st.markdown(f"**Type de projet** : {s.get('proj_type', 'Rénovation')}")
+            st.markdown(f"**Projet** : {s.get('proj_type', 'Rénovation')}")
             st.markdown(f"**Matériaux** : {s.get('mat_type', 'PVC')}")
-            st.markdown(f"**Type de pose** : {s.get('pose_type', '-')}")
+            st.markdown(f"**Pose** : {s.get('pose_type', '-')}")
             st.markdown(f"**Dormant** : {s.get('frame_thig', 70)} mm")
-            
-            # Ailettes
-            if s.get('fin_val', 0) > 0:
-                 st.markdown(f"**Ailettes** : {s.get('fin_val',0)}mm (H/G/D) / {s.get('fin_bot', 0) if not s.get('same_bot') else s.get('fin_val',0)}mm (Bas)")
-            else:
-                 st.markdown(f"**Ailettes** : Sans")
+            ail_txt = f"{s.get('fin_val',0)}mm (H/G/D)" if s.get('fin_val',0) > 0 else "Sans"
+            st.markdown(f"**Ailettes** : {ail_txt}")
             
         with c2:
-             # Appui Rapporté ?
-             if s.get('is_appui_rap', False):
-                 st.markdown(f"**Appui rapporté** : OUI ({s.get('width_appui')}mm)")
-             else:
-                 st.markdown(f"**Appui rapporté** : NON")
-
-             st.markdown(f"**Couleur** : {s.get('col_in','-')} (Int) / {s.get('col_ex','-')} (Ext)")
-             st.markdown(f"**Type de côtes** : {s.get('dim_type', 'Tableau')}")
-             st.markdown(f"**Dim. Dos de Dormant** : {w_d} x {h_d} mm")
-             st.markdown(f"**Dim. Recouvrement Int.** : {w_rec} x {h_rec} mm")
-             st.markdown(f"**Hauteur d'allège** : {s.get('h_allege', 0)} mm")
-             
-             # Volet Roulant
-             if s.get('vr_enable'):
-                  st.markdown(f"**Volet Roulant** : OUI ({int(s.get('vr_h',0))}mm)")
-             else:
-                  st.markdown(f"**Volet Roulant** : NON")
+             st.markdown(f"**Appui** : {'OUI' if s.get('is_appui_rap') else 'NON'}")
+             st.markdown(f"**Couleur** : {s.get('col_in','-')} / {s.get('col_ex','-')}")
+             st.markdown(f"**Côtes** : {s.get('dim_type', 'Tableau')}")
+             st.markdown(f"**Dos Dormant** : {w_d} x {h_d} mm")
+             st.markdown(f"**Recouvrement** : {w_rec} x {h_rec} mm")
+             st.markdown(f"**Allège** : {s.get('h_allege', 0)} mm")
+             st.markdown(f"**Volet R.** : {'OUI' if s.get('vr_enable') else 'NON'}")
 
         st.markdown("---")
         
-        # --- SECTION 2: DETAILS PAR ZONE (Strict Schema) ---
+        # --- SECTION 2: DETAILS PAR ZONE ---
         st.markdown("#### Détails par Zone")
         
         for i, z in enumerate(sorted_zones):
-             # Schema: Match User Request
-             # 1. Dim Zone
-             # 2. Type Config
-             # 3. Traverse ? (Epaisseur, Remplissage H/B)
-             # 4. Type Vitrage
-             # 5. Ventilation
-             
              parts = []
-             # 1. Dimensions
              parts.append(f"**{z['label']}** : {int(z['w'])} x {int(z['h'])} mm")
-             
-             # 2. Type Config
              parts.append(f"Config : {z['type']}")
              
-             # 3. Traverses Logic
              nb_h = z['params'].get('traverses', 0)
-             # Note: User prompt implies "Traverse" singular/list. 
-             # If traverse exists, show details.
              if nb_h > 0:
                  ep_t = z['params'].get('epaisseur_traverse', 20)
-                 parts.append(f"Traverse : {nb_h} Horiz.")
-                 parts.append(f"Ep. {ep_t}mm")
-                 # Remplissage Haut/Bas check (Only implies if Soubassement/1H)
+                 parts.append(f"Trav. {nb_h}H (Ep.{ep_t}mm)")
                  if nb_h == 1 and z['params'].get('traverses_v', 0) == 0:
-                      parts.append(f"Remp. Haut: {z['params'].get('remp_haut','Vitrage')}")
-                      parts.append(f"Remp. Bas: {z['params'].get('remp_bas','Panneau')}")
+                      parts.append(f"Remp. {z['params'].get('remp_haut')}/{z['params'].get('remp_bas')}")
              else:
-                 # Check Petits Bois / Muntins Grid if not strictly a 'Traverse' divider
                  nb_v = z['params'].get('traverses_v', 0)
                  if nb_v > 0:
-                      parts.append(f"Petits Bois : {nb_v} Vert.")
+                      parts.append(f"PB {nb_v}V")
              
-             # 4. Vitrage / Remplissage Global
-             # If Remplissage Global is used (no split traverse logic overriding it)
              remp_g = z['params'].get('remplissage_global', 'Vitrage')
              if remp_g == "Vitrage":
-                  # Clean Vitrage String
                   v_str = str(z['params'].get('vitrage_resume', '-')).replace('\n', ' ')
-                  parts.append(f"Vitrage : {v_str}")
+                  parts.append(f"Vit. {v_str}")
              else:
-                  parts.append(f"Remplissage : Panneau Plein")
+                  parts.append(f"Panneau")
                   
-             # 5. Ventilation
              g_pos = z['params'].get('pos_grille', 'Aucune')
              if g_pos != "Aucune":
-                  parts.append(f"Ventilation : {g_pos}")
-             else:
-                  parts.append(f"Ventilation : Non")
+                  parts.append(f"VMC {g_pos}")
 
-             # Render
              st.markdown(" • ".join(parts))
-        
-        st.markdown("---")
-        
-        # Button for Printing
-        if st.button("🖨️ Imprimer", key="btn_print_html_main"):
-            # Pass a unique timestamp to force HTML regeneration
-            s['print_ts'] = datetime.datetime.now().isoformat()
-            html_content = render_html_menuiserie(s, svg_output, LOGO_B64)
-            
-            # Append invisible timestamp to force Streamlit component update and re-trigger JS
-            html_content += f"<!-- TS: {s['print_ts']} -->"
-            
-            import streamlit.components.v1 as components
-            # Height 0 to be invisible, but content triggers JS
-            components.html(html_content, height=0, width=0)
-            st.info(f"Impression lancée... ({s['print_ts'].split('T')[1][:8]})")
 
+    elif current_mode == 'Volet Roulant':
+        # 1. PLAN TECHNIQUE VOLET
+        try:
+            svg_output = generate_svg_volet()
+            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Erreur SVG Volet: {e}")
+        
+        # 2. IMPRESSION VOLET
+        st.markdown("### 📋 Fiche Volet")
+        st.markdown("---")
+        if st.button("🖨️ Impression Volet", use_container_width=True):
+            html_print = render_html_volet(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+            from streamlit.components.v1 import html
+            html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
+            
     else:
         # HABILLAGE PREVIEW
         if hab_config:
             render_habillage_main_ui(hab_config)
         else:
             st.info("Configuration Habillage non initialisée.")
+
 
 
 # END OF CODE V73.5 (VALIDATED)
