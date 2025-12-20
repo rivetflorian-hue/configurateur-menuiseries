@@ -375,9 +375,6 @@ def render_html_menuiserie(s, svg_string, logo_b64):
                 Merci de vérifier les cotes avant validation définitive.
             </div>
         </div>
-        <script>
-            setTimeout(() => {{ window.print(); }}, 800);
-        </script>
     </body>
     </html>
     """
@@ -3977,6 +3974,9 @@ def render_annexes():
                          
                          # V73: Revert to simple iframe as it worked locally.
                          # Height set to 1200px.
+                         # Add Direct Link for browsers blocking iframes
+                         st.markdown(f'<a href="data:application/pdf;base64,{base64_pdf}" target="_blank">🔗 Ouvrir le PDF dans un nouvel onglet</a>', unsafe_allow_html=True)
+                         
                          pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
                          st.markdown(pdf_display, unsafe_allow_html=True)
                      except Exception as e:
@@ -4080,15 +4080,7 @@ with c_preview:
         st.markdown("### 📋 Fiche Technique")
         st.markdown("---")
         
-        # Bouton Impression & Téléchargement
-        c_print, c_dl_html = st.columns(2)
         
-        # Generator HTML once
-        try:
-             html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
-        except Exception as e:
-             html_print = f"Erreur génération: {e}"
-             st.error(f"Erreur interne: {e}")
 
         # Bouton Impression & Téléchargement
         c_print, c_dl_html = st.columns(2)
@@ -4102,10 +4094,14 @@ with c_preview:
 
         with c_print:
             if st.button("🖨️ Impression", use_container_width=True):
-                 # Safety for template literal (Backticks only) - Exact match to Volet Roulant logic
-                 html_print_safe = html_print.replace('`', '\`')
-                 from streamlit.components.v1 import html
-                 html(f"<script>var w=window.open();w.document.write(`{html_print_safe}`);w.document.close();w.print();</script>", height=0)
+                 try:
+                     import json
+                     # V73 FIX: Robust serialization to avoid JS syntax errors
+                     html_json = json.dumps(html_print)
+                     from streamlit.components.v1 import html
+                     html(f"<script>var w=window.open();w.document.write({html_json});w.document.close();setTimeout(function(){{w.print();}}, 1000);</script>", height=0)
+                 except Exception as e:
+                     st.error(f"Erreur impression: {e}")
         
         with c_dl_html:
             st.download_button(
