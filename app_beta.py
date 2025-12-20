@@ -3916,14 +3916,18 @@ def render_annexes():
         
         def render_doc_item(file_name, key_suffix, label=None):
             """Helper to render a row for a document"""
+            # Try standard assets, then try others if needed
             p = os.path.join(current_dir, "assets", file_name)
+            
             if not os.path.exists(p):
                  # DEBUG: List directory content to help diagnostics on prod
                  try:
                      assets_path = os.path.join(current_dir, "assets")
                      if os.path.exists(assets_path):
                         available = os.listdir(assets_path)
-                        st.error(f"Manquant: {file_name} (Dispo: {available})")
+                        # Truncate list if too long
+                        if len(available) > 10: available = available[:10] + ["..."]
+                        st.error(f"Manquant: {file_name} (Dans assets: {available})")
                      else:
                         st.error(f"Dossier assets introuvable: {assets_path}")
                  except Exception as e:
@@ -4076,17 +4080,14 @@ with c_preview:
         
         # Bouton Impression
         if st.button("🖨️ Impression Fiche Technique", use_container_width=True):
-            with st.spinner("Génération du document d'impression..."):
-                try:
-                    html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
-                    # Escape backticks to prevent JS error
-                    html_print_safe = html_print.replace('`', '\`')
-                    
-                    from streamlit.components.v1 import html
-                    html(f"<script>var w=window.open();w.document.write(`{html_print_safe}`);w.document.close();w.setTimeout(function(){{w.print();}}, 500);</script>", height=0)
-                    st.success("Impression lancée (vérifiez vos popups)")
-                except Exception as e:
-                    st.error(f"Erreur lors de l'impression: {e}")
+             try:
+                 html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+                 # Safety for template literal
+                 html_print = html_print.replace('`', '\`')
+                 from streamlit.components.v1 import html
+                 html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
+             except Exception as e:
+                 st.error(f"Erreur Python lors de la génération de l'impression : {e}")
 
         # PREPARE ZONES DATA
         s = st.session_state
