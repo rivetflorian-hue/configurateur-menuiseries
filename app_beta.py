@@ -336,7 +336,6 @@ def render_html_menuiserie(s, svg_string, logo_b64):
                     <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
                     <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('qte_val', 1)}</span></div>
                     <div class="panel-row"><span class="lbl">Projet</span> <span class="val">{s.get('proj_type', 'Rénovation')}</span></div>
-                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('mat_type', 'PVC')}</span></div>
                     <div class="panel-row"><span class="lbl">Pose</span> <span class="val">{s.get('pose_type')}</span></div>
                     <div class="panel-row"><span class="lbl">Dormant</span> <span class="val">{s.get('frame_thig')} mm</span></div>
                     <div class="panel-row"><span class="lbl">Ailettes</span> <span class="val">{ail_str}</span></div>
@@ -586,26 +585,33 @@ def render_top_navigation():
             st.session_state['project']['name'] = proj_name
             
     with c_imp:
-        with st.popover("⚙️ Options"):
-            st.markdown("### Import / Export")
-            proj_data = json.dumps(st.session_state['project'], indent=2)
-            raw_name = st.session_state['project'].get('name', 'Projet_Fenetre')
-            safe_name = "".join([c if c.isalnum() else "_" for c in raw_name])
-            dl_name = f"{safe_name}.json"
-            
-            st.download_button("Export (JSON)", proj_data, file_name=dl_name, mime="application/json")
-            
-            uploaded = st.file_uploader("Import JSON", type=['json'], key='uploader_json')
-            if uploaded and st.button("📥 Charger le Projet"):
-                 try:
-                    data = json.load(uploaded)
-                    if 'configs' in data:
-                        st.session_state['project'] = data
-                        st.session_state['active_config_id'] = None
-                        st.toast("Projet importé avec succès !")
-                        st.rerun()
-                 except Exception as e:
-                    st.error(f"Erreur : {e}")
+        col_new, col_opt = st.columns([1, 1])
+        with col_new:
+            if st.button("🗑️ Nouveau", help="Tout effacer et recommencer", use_container_width=True):
+                st.session_state.clear()
+                st.rerun()
+        
+        with col_opt:
+            with st.popover("⚙️ Options", use_container_width=True):
+                st.markdown("### Import / Export")
+                proj_data = json.dumps(st.session_state['project'], indent=2)
+                raw_name = st.session_state['project'].get('name', 'Projet_Fenetre')
+                safe_name = "".join([c if c.isalnum() else "_" for c in raw_name])
+                dl_name = f"{safe_name}.json"
+                
+                st.download_button("Export (JSON)", proj_data, file_name=dl_name, mime="application/json")
+                
+                uploaded = st.file_uploader("Import JSON", type=['json'], key='uploader_json')
+                if uploaded and st.button("📥 Charger le Projet"):
+                     try:
+                        data = json.load(uploaded)
+                        if 'configs' in data:
+                            st.session_state['project'] = data
+                            st.session_state['active_config_id'] = None
+                            st.toast("Projet importé avec succès !")
+                            st.rerun()
+                     except Exception as e:
+                        st.error(f"Erreur : {e}")
 
     st.markdown("---")
     
@@ -3391,7 +3397,11 @@ def render_volet_form():
         else: # Motorisé
             c_m1, c_m2 = st.columns(2)
             with c_m1:
-                mot = st.selectbox("Marque", ["SOMFY", "SIMU"], index=0 if s.get('vr_motor') == "SOMFY" else 1, key="vr_mot_in")
+                # Default to SOMFY if not set
+                current_motor = s.get('vr_motor')
+                if current_motor is None: current_motor = "SOMFY"
+                
+                mot = st.selectbox("Marque", ["SOMFY", "SIMU"], index=0 if current_motor == "SOMFY" else 1, key="vr_mot_in")
                 s['vr_motor'] = mot
                 
                 # Protocol (IO/RTS/Filaire + IO SOLAIRE)
@@ -3746,15 +3756,15 @@ def render_html_volet(s, svg_string, logo_b64):
         h3 { font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; border-left: 5px solid #3498db; padding-left: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px; }
         
         .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
-        .panel-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dotted #ccc; }
+        .panel-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dotted #ccc; min-height: 22px; }
         .panel-row:last-child { border-bottom: none; }
-        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; }
-        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; }
+        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; display: flex; align-items: center; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; display: flex; align-items: center; justify-content: flex-end; }
         
-        .visual-box { border: 1px solid #eee; margin-top: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; width: 100%; height: 600px; }
-        .visual-box svg { height: 90%; width: auto; max-width: 95%; }
+        .visual-box { border: 1px solid #eee; margin-top: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; width: 100%; height: auto; min-height: 500px; padding: 20px 0 40px 0; }
+        .visual-box svg { height: auto; width: auto; max-width: 95%; max-height: 450px; }
         
-        .footer { position: fixed; bottom: 10mm; left: 0; right: 0; font-size: 9px; color: #999; text-align: center; }
+        .footer { position: fixed; bottom: 5mm; left: 0; right: 0; font-size: 9px; color: #999; text-align: center; }
 
         @media print {
             @page { size: A4; margin: 12mm; }
@@ -3774,6 +3784,21 @@ def render_html_volet(s, svg_string, logo_b64):
     ref_id = s.get('ref_id', 'VR-01')
     import datetime
     
+    # Pre-calculate Motor Details HTML to avoid f-string syntax errors
+    if s.get('vr_type') == 'Motorisé':
+        motor_details_html = f"""
+                    <div class="panel-row"><span class="lbl">Motorisation</span> <span class="val">{s.get('vr_motor', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Puissance</span> <span class="val">{s.get('vr_power', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Protocole</span> <span class="val">{s.get('vr_proto', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Sortie de fil</span> <span class="val">{s.get('vr_cable_side', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Longueur Câble</span> <span class="val">{s.get('vr_cable_len', '-')}</span></div>
+        """
+    else:
+        motor_details_html = f"""
+                    <div class="panel-row"><span class="lbl">Sortie Manivelle</span> <span class="val">{s.get('vr_crank_side', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Longueur Manivelle</span> <span class="val">{s.get('vr_crank_len', '-')} mm</span></div>
+        """
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -3799,30 +3824,23 @@ def render_html_volet(s, svg_string, logo_b64):
                 <div class="panel">
                     <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
                     <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('vr_qte', 1)}</span></div>
-                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('vr_mat', 'Aluminium')}</span></div>
-                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('vr_width')} x {s.get('vr_height')} mm</span></div>
-                    <div class="panel-row"><span class="lbl">Type Côtes</span> <span class="val">{s.get('vr_dim_type')}</span></div>
-                    
-                    <!-- Motorisation Détaillée -->
-                    <div class="panel-row"><span class="lbl">Manoeuvre</span> <span class="val">{s.get('vr_type')}</span></div>
-                    
-                    {f'<div class="panel-row"><span class="lbl">Sortie Manivelle</span> <span class="val">{s.get("vr_crank_side", "Droite")} / {s.get("vr_crank_len", 1200)}mm</span></div>' if s.get('vr_type') == "Manuel" else ''}
+                    <div class="panel-row"><span class="lbl">Type de côtes</span> <span class="val">{s.get('vr_dim_type', 'Côtes Tableau')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('vr_width', 0)} x {s.get('vr_height', 0)} mm</span></div>
+                </div>
+            </div>
 
-                    {f'<div class="panel-row"><span class="lbl">Motorisation</span> <span class="val">{s.get("vr_motor")} ({s.get("vr_proto", "-")} / {s.get("vr_power", "-")})</span></div>' if s.get('vr_type') == "Motorisé" else ''}
-
-                    <!-- Sortie de Fil -->
-                    {f'<div class="panel-row"><span class="lbl">Sortie de Fil</span> <span class="val">{s.get("vr_cable_side", "Droite")} / {s.get("vr_cable_len", "5 ML")}</span></div>' if s.get('vr_type') == "Motorisé" else ''}
+            <!-- DETAILS TECHNIQUES -->
+            <div class="section-block">
+                <h3>Détails Techniques</h3>
+                <div class="panel">
+                    <div class="panel-row"><span class="lbl">Couleur Coffre</span> <span class="val">{s.get('vr_col_coffre', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Couleur Coulisses</span> <span class="val">{s.get('vr_col_coulisses', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Couleur Tablier</span> <span class="val">{s.get('vr_col_tablier', '-')}</span></div>
+                    <div class="panel-row"><span class="lbl">Couleur Lame Finale</span> <span class="val">{s.get('vr_col_lame_fin', '-')}</span></div>
                     
-                    <!-- Solaire -->
-                    {f'<div class="panel-row"><span class="lbl">Option Solaire</span> <span class="val">OUI (Panneau sur Coffre)</span></div>' if s.get('vr_proto') == "IO SOLAIRE" else ''}
-
-                    <!-- Couleurs -->
-                    <div style="margin-top:10px; border-top:1px solid #eee; padding-top:5px;">
-                        <div class="panel-row"><span class="lbl">Coffre</span> <span class="val">{s.get('vr_col_coffre', '-')}</span></div>
-                        <div class="panel-row"><span class="lbl">Coulisses</span> <span class="val">{s.get('vr_col_coulisses', '-')}</span></div>
-                        <div class="panel-row"><span class="lbl">Tablier</span> <span class="val">{s.get('vr_col_tablier', '-')}</span></div>
-                        <div class="panel-row"><span class="lbl">Lame Finale</span> <span class="val">{s.get('vr_col_lame_fin', '-')}</span></div>
-                    </div>
+                    <div class="panel-row" style="border-top: 2px solid #eee; margin-top: 5px; padding-top: 5px;"><span class="lbl">Type de Manoeuvre</span> <span class="val">{s.get('vr_type', 'Manuel')}</span></div>
+                    
+                    {motor_details_html}
                 </div>
             </div>
             
@@ -4189,6 +4207,32 @@ with c_preview:
         
         # 2. IMPRESSION VOLET
         st.markdown("### 📋 Fiche Volet")
+        st.markdown("---")
+        
+        # UI SUMMARY (Style Menuiserie)
+        s = st.session_state
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.markdown(f"**Repère** : {s.get('ref_id', 'VR-01')}")
+            st.markdown(f"**Quantité** : {s.get('vr_qte', 1)}")
+            st.markdown(f"**Dimensions** : {s.get('vr_width')} x {s.get('vr_height')} mm")
+            st.markdown(f"**Type** : {s.get('vr_type')}")
+            st.markdown(f"**Coffre** : {s.get('vr_col_coffre')}")
+
+        with c2:
+            st.markdown(f"**Tablier** : {s.get('vr_col_tablier')}")
+            if s.get('vr_type') == 'Motorisé':
+                st.markdown(f"**Moteur** : {s.get('vr_motor')} ({s.get('vr_power')})")
+                st.markdown(f"**Commande** : {s.get('vr_proto')}")
+                st.markdown(f"**Sortie** : {s.get('vr_cable_side')} / {s.get('vr_cable_len')}")
+            else:
+                st.markdown(f"**Manivelle** : {s.get('vr_crank_side')} / {s.get('vr_crank_len')}mm")
+            
+            # Add Solar info if applicable
+            if s.get('vr_proto') == "IO SOLAIRE":
+                 st.markdown("**Option** : SOLAIRE")
+
         st.markdown("---")
         if st.button("🖨️ Impression Volet", use_container_width=True):
             html_print = render_html_volet(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
