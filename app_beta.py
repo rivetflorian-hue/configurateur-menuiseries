@@ -3863,13 +3863,14 @@ def render_html_volet(s, svg_string, logo_b64):
 
 
 # --- MODULE ANNEXES (NOUVEAU) ---
+# V73: BASE DE DONNEES DES ANNEXES
 ANNEXES_DB = {
     "Général": [
-        "2 Multiproduits FPEE - 2024.pdf",
-        "FPEE - ALU _ PVC Portes Tertiaires_.pdf",
-        "FPEE - Portails.pdf",
         "Glossaire FPEE.pdf",
-        "Doc Tech Depose Totale (FPEE).pdf"
+        "2 Multiproduits FPEE - 2024.pdf",
+        # "FPEE - Portails.pdf", # Supprimé car trop gros (>100Mo) et non uploadé
+        "Doc Tech Depose Totale (FPEE).pdf",
+        "FPEE - ALU _ PVC Portes Tertiaires_.pdf"
     ],
     "PVC": {
         "Catalogues": [
@@ -3916,22 +3917,21 @@ def render_annexes():
         
         def render_doc_item(file_name, key_suffix, label=None):
             """Helper to render a row for a document"""
-            # Try standard assets, then try others if needed
             p = os.path.join(current_dir, "assets", file_name)
             
             if not os.path.exists(p):
-                 # DEBUG: List directory content to help diagnostics on prod
+                 # DEBUG: List assets content to diagnose if file is really missing or path issue
                  try:
                      assets_path = os.path.join(current_dir, "assets")
                      if os.path.exists(assets_path):
                         available = os.listdir(assets_path)
                         # Truncate list if too long
                         if len(available) > 10: available = available[:10] + ["..."]
-                        st.error(f"Manquant: {file_name} (Dans assets: {available})")
+                        st.error(f"Fichier introuvable: {file_name} (Contenu du dossier assets: {available})")
                      else:
-                        st.error(f"Dossier assets introuvable: {assets_path}")
+                        st.error(f"Dossier 'assets' introuvable au chemin : {assets_path}")
                  except Exception as e:
-                     st.error(f"Manquant: {file_name} (Erreur listing: {e})")
+                     st.error(f"Erreur de lecture du dossier assets: {e}")
                  return
 
             # Layout: Button Download | Button View | Filename
@@ -3974,8 +3974,9 @@ def render_annexes():
                      try:
                          with open(p, "rb") as f:
                              base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-                         # Height increased to 1200px for full page view
-                         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
+                         
+                         # V73 FIX: Use <embed> instead of <iframe> for better browser compatibility (avoid white screen)
+                         pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf">'
                          st.markdown(pdf_display, unsafe_allow_html=True)
                      except Exception as e:
                          st.error(f"Erreur d'affichage: {e}")
@@ -4078,16 +4079,37 @@ with c_preview:
         st.markdown("### 📋 Fiche Technique")
         st.markdown("---")
         
-        # Bouton Impression
-        if st.button("🖨️ Impression Fiche Technique", use_container_width=True):
-             try:
-                 html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
-                 # Safety for template literal
-                 html_print = html_print.replace('`', '\`')
-                 from streamlit.components.v1 import html
-                 html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
-             except Exception as e:
-                 st.error(f"Erreur Python lors de la génération de l'impression : {e}")
+        # Bouton Impression & Téléchargement
+        c_print, c_dl_html = st.columns(2)
+        
+        # Generator HTML once
+        try:
+             html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+        except Exception as e:
+             html_print = f"Erreur génération: {e}"
+             st.error(f"Erreur interne: {e}")
+
+        with c_print:
+            if st.button("🖨️ Impression", use_container_width=True):
+                 try:
+                     import json
+                     # Safe serialization of HTML string for JavaScript
+                     html_json = json.dumps(html_print)
+                     
+                     from streamlit.components.v1 import html
+                     # Use the serialized string directly
+                     html(f"<script>var w=window.open();w.document.write({html_json});w.document.close();w.print();</script>", height=0)
+                 except Exception as e:
+                     st.error(f"Erreur script impression: {e}")
+        
+        with c_dl_html:
+            st.download_button(
+                "💾 Télécharger Fiche (.html)",
+                html_print,
+                file_name=f"Fiche_{st.session_state.get('ref_id', 'Menuiserie')}.html",
+                mime="text/html",
+                use_container_width=True
+            )
 
         # PREPARE ZONES DATA
         s = st.session_state
