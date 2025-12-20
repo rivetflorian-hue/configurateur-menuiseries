@@ -3975,15 +3975,9 @@ def render_annexes():
                          with open(p, "rb") as f:
                              base64_pdf = base64.b64encode(f.read()).decode('utf-8')
                          
-                         # V73 FIX: Use <object> tag which is more robust than embed/iframe for inline PDFs
-                         # Fallback content provided inside the tag
-                         pdf_display = f'''
-                            <object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="1200px">
-                                <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200px" style="border: none;">
-                                This browser does not support PDFs. Please download the PDF to view it: <a href="data:application/pdf;base64,{base64_pdf}" download="{clean_name}.pdf">Download PDF</a>
-                                </iframe>
-                            </object>
-                         '''
+                         # V73: Revert to simple iframe as it worked locally.
+                         # Height set to 1200px.
+                         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
                          st.markdown(pdf_display, unsafe_allow_html=True)
                      except Exception as e:
                          st.error(f"Erreur d'affichage: {e}")
@@ -4108,7 +4102,7 @@ with c_preview:
 
         with c_print:
             if st.button("🖨️ Impression", use_container_width=True):
-                 # Safety for template literal (Backticks only) - Logic identical to Volet Roulant
+                 # Safety for template literal (Backticks only) - Exact match to Volet Roulant logic
                  html_print_safe = html_print.replace('`', '\`')
                  from streamlit.components.v1 import html
                  html(f"<script>var w=window.open();w.document.write(`{html_print_safe}`);w.document.close();w.print();</script>", height=0)
