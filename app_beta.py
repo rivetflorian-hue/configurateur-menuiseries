@@ -3918,7 +3918,16 @@ def render_annexes():
             """Helper to render a row for a document"""
             p = os.path.join(current_dir, "assets", file_name)
             if not os.path.exists(p):
-                 st.error(f"Manquant: {file_name}")
+                 # DEBUG: List directory content to help diagnostics on prod
+                 try:
+                     assets_path = os.path.join(current_dir, "assets")
+                     if os.path.exists(assets_path):
+                        available = os.listdir(assets_path)
+                        st.error(f"Manquant: {file_name} (Dispo: {available})")
+                     else:
+                        st.error(f"Dossier assets introuvable: {assets_path}")
+                 except Exception as e:
+                     st.error(f"Manquant: {file_name} (Erreur listing: {e})")
                  return
 
             # Layout: Button Download | Button View | Filename
@@ -4067,9 +4076,17 @@ with c_preview:
         
         # Bouton Impression
         if st.button("🖨️ Impression Fiche Technique", use_container_width=True):
-            html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
-            from streamlit.components.v1 import html
-            html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
+            with st.spinner("Génération du document d'impression..."):
+                try:
+                    html_print = render_html_menuiserie(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+                    # Escape backticks to prevent JS error
+                    html_print_safe = html_print.replace('`', '\`')
+                    
+                    from streamlit.components.v1 import html
+                    html(f"<script>var w=window.open();w.document.write(`{html_print_safe}`);w.document.close();w.setTimeout(function(){{w.print();}}, 500);</script>", height=0)
+                    st.success("Impression lancée (vérifiez vos popups)")
+                except Exception as e:
+                    st.error(f"Erreur lors de l'impression: {e}")
 
         # PREPARE ZONES DATA
         s = st.session_state
