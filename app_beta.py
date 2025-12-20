@@ -4072,12 +4072,12 @@ with c_preview:
             html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
 
         # PREPARE ZONES DATA
-        config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
-        sorted_zones = sorted(config_display, key=lambda z: z['id'])
         s = st.session_state
-
         w_d = s.get('width_dorm', 0)
         h_d = s.get('height_dorm', 0)
+
+        config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,w_d,h_d)
+        sorted_zones = sorted(config_display, key=lambda z: z['id'])
 
         # --- SECTION 1: INFORMATIONS GLOBALES ---
         c1, c2 = st.columns(2)
