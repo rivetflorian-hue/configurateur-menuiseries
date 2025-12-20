@@ -254,7 +254,40 @@ def render_html_menuiserie(s, svg_string, logo_b64):
          first_type = sorted_zones[0]['type']
          if all(z['type'] == first_type for z in sorted_zones): common_specs['Type'] = first_type
          
-         def get_vit(zparams): return str(zparams.get('vitrage_resume', '-')).replace('\n', ' ')
+         def get_vit(zparams):
+             # V12 ROBUSTNESS: Reconstruct if missing
+             res = zparams.get('vitrage_resume', '')
+             if not res or res == "None":
+                 # Try to reconstruct from components
+                 if 'vitrage_ext_ep' in zparams:
+                     # V11 Logic Reconstruction
+                     try:
+                         ep_e = str(zparams.get('vitrage_ext_ep','4')).replace(' mm', '')
+                         ep_i = str(zparams.get('vitrage_int_ep','4')).replace(' mm', '')
+                         # Handle "Vide Air" key variation (vide_air_ep vs vit_ep_air)
+                         ep_a = str(zparams.get('vide_air_ep', zparams.get('vit_ep_air', '16'))).replace(' mm', '')
+                         
+                         c_e = zparams.get('vitrage_ext_couche','Aucune')
+                         c_i = zparams.get('vitrage_int_couche','Aucune')
+                         
+                         sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+                         sf_i = "FE" if "FE" in c_i else ""
+                         
+                         ty_e = zparams.get('vitrage_ext_type','Clair')
+                         st_e = f" {ty_e}" if ty_e != "Clair" else ""
+                         
+                         ty_i = zparams.get('vitrage_int_type','Clair')
+                         st_i = f" {ty_i}" if ty_i != "Clair" else ""
+                         
+                         gaz = zparams.get('vit_gaz','Argon').upper() # Default to Argon if missing
+                         inter = str(zparams.get('intercalaire_type','Alu')).upper()
+                         
+                         res = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+                     except:
+                         res = "-"
+                 else:
+                     res = "-"
+             return str(res).replace('\n', ' ')
          first_vit = get_vit(sorted_zones[0]['params'])
          if all(get_vit(z['params']) == first_vit for z in sorted_zones): common_specs['Vitrage'] = first_vit
          
@@ -4351,40 +4384,63 @@ def render_html_vitrage(s, svg_string, logo_b64):
             </div>
         """
     
-    # Calculate Resume if missing (Old Saves Fix)
-    # ALWAYS Calculate Resume from components to ensure no "None" is displayed
-    vt = s.get('vit_type_mode', 'Double Vitrage')
-    if vt == "Double Vitrage":
-        # Format: Vit. 4 / 20 / 4FE - WARM EDGE NOIR + GAZ ARGON
-        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
-        ep_i = s.get('vit_ep_int','4').replace(' mm', '')
-        ep_a = s.get('vit_ep_air','16').replace(' mm', '')
-        
-        c_e = s.get('vit_couche_ext','Aucune')
-        c_i = s.get('vit_couche_int','Aucune')
-        
-        sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
-        sf_i = "FE" if "FE" in c_i else ""
-        
-        ty_e = s.get('vit_type_ext','Clair')
-        st_e = f" {ty_e}" if ty_e != "Clair" else ""
-        
-        ty_i = s.get('vit_type_int','Clair')
-        st_i = f" {ty_i}" if ty_i != "Clair" else ""
-        
-        gaz = s.get('vit_gaz','Argon').upper()
-        inter = s.get('vit_intercalaire','Alu').upper()
-        
-        vit_resume = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+    # V13 ROBUSTNESS: Unified Logic with Menuiserie
+    # Use local helper to reconstruct string if components exist, else "-"
+    def reconstruct_vit_string(d):
+        res = d.get('vitrage_resume', '')
+        # Force calc if empty, None, or stale
+        if not res or res == "None" or "None" in str(res):
+             vt_mode = d.get('vit_type_mode', 'Double Vitrage')
+             
+             if vt_mode == "Double Vitrage":
+                 try:
+                     ep_e = str(d.get('vit_ep_ext','4')).replace(' mm', '')
+                     ep_i = str(d.get('vit_ep_int','4')).replace(' mm', '')
+                     ep_a = str(d.get('vit_ep_air','16')).replace(' mm', '')
+                     
+                     c_e = str(d.get('vit_couche_ext','Aucune'))
+                     c_i = str(d.get('vit_couche_int','Aucune'))
+                     
+                     sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+                     sf_i = "FE" if "FE" in c_i else ""
+                     
+                     ty_e = str(d.get('vit_type_ext','Clair'))
+                     st_e = f" {ty_e}" if ty_e != "Clair" else ""
+                     
+                     ty_i = str(d.get('vit_type_int','Clair'))
+                     st_i = f" {ty_i}" if ty_i != "Clair" else ""
+                     
+                     gaz = str(d.get('vit_gaz','Argon')).upper()
+                     inter = str(d.get('vit_intercalaire','Alu')).upper()
+                     
+                     res = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+                 except Exception as e:
+                     res = f"Erreur Calc ({str(e)})"
+                     
+             elif vt_mode == "Simple Vitrage":
+                 ep_e = str(d.get('vit_ep_ext','4')).replace(' mm', '')
+                 ty_e = str(d.get('vit_type_ext','Clair'))
+                 res = f"Simple {ep_e} {ty_e}"
+             else:
+                 res = "Panneau Plein"
+                 
+        return str(res)
 
-    elif vt == "Simple Vitrage":
-        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
-        ty_e = s.get('vit_type_ext','Clair')
-        vit_resume = f"Simple {ep_e} {ty_e}"
-    else:
-        vit_resume = "Panneau Plein"
+    vit_resume = reconstruct_vit_string(s)
 
-    style = """<style> body { font-family: sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } .section-block { margin-top: 20px; page-break-inside: avoid; } h3 { border-left: 5px solid #3498db; padding-left: 10px; color: #2c3e50; } .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; } table { width: 100%; border-collapse: collapse; } td { padding: 8px; border-bottom: 1px dotted #ccc; } .label { font-weight: bold; width: 40%; } </style>"""
+    style = """<style> 
+        body { font-family: 'Helvetica', sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; font-size: 12px; } 
+        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; } 
+        .section-block { margin-top: 15px; page-break-inside: avoid; } 
+        h1 { font-size: 24px; margin: 0; }
+        h2 { font-size: 14px; margin: 5px 0 0 0; color: #555; }
+        h3 { border-left: 4px solid #3498db; padding-left: 8px; color: #2c3e50; font-size: 14px; margin: 0 0 10px 0; } 
+        .panel { background: #fdfdfd; padding: 10px; border: 1px solid #eee; } 
+        table { width: 100%; border-collapse: collapse; font-size: 11px; } 
+        td { padding: 6px; border-bottom: 1px dotted #ccc; } 
+        .label { font-weight: bold; width: 35%; color: #444; } 
+        @media print { body { margin: 10mm; } }
+    </style>"""
     
     logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-height:80px;">' if logo_b64 else ""
 
@@ -4394,8 +4450,8 @@ def render_html_vitrage(s, svg_string, logo_b64):
     <body>
         <div class="header">
             <div>
-                <h1 style="margin:0;">Fiche Vitrage</h1>
-                <h2 style="margin:5px 0 0 0; color:#555;">Ref: {s.get('vit_ref', 'V-01')}</h2>
+                <h1 style="margin:0;">Fiche Vitrage (V11)</h1>
+                <h2 style="margin:5px 0 0 0; color:#555;">Ref: {s.get('vit_ref', 'V-??')}</h2>
             </div>
             <div>{logo_html}</div>
         </div>
@@ -4408,6 +4464,7 @@ def render_html_vitrage(s, svg_string, logo_b64):
                     <tr><td class="label">Matériau</td><td>{s.get('vit_mat')}</td></tr>
                     <tr><td class="label">Type Châssis</td><td>{s.get('vit_type_chassis')}</td></tr>
                     <tr><td class="label">Dimensions</td><td>{s.get('vit_width')} x {s.get('vit_height')} mm</td></tr>
+                    <tr><td class="label">H. Bas</td><td>{s.get('vit_h_bas', 0)} mm</td></tr>
                     <tr><td class="label">Type Côtes</td><td>{s.get('vit_dim_type')}</td></tr>
                     <tr><td class="label">Verre</td><td>{vit_resume}</td></tr>
                     <tr><td class="label">H. Bas Verre</td><td>{s.get('vit_h_bas')} mm</td></tr>
@@ -4881,8 +4938,34 @@ with c_preview:
         with c2:
              st.markdown(f"**Matériau** : {s.get('vit_mat')}")
              st.markdown(f"**Châssis** : {s.get('vit_type_chassis')}")
-             gls = s.get('vit_verre_custom') if s.get('vit_verre') == 'Autre' else s.get('vit_verre')
-             st.markdown(f"**Verre** : {gls}")
+             # V13 UI FIX: Use Robust Reconstruction (Inline)
+             res_ui = s.get('vitrage_resume', '')
+             if not res_ui or "None" in str(res_ui):
+                 # Quick Reconstruct
+                 try:
+                     vt_mode = s.get('vit_type_mode', 'Double Vitrage')
+                     if vt_mode == "Double Vitrage":
+                         ep_e = str(s.get('vit_ep_ext','4')).replace(' mm', '')
+                         ep_i = str(s.get('vit_ep_int','4')).replace(' mm', '')
+                         ep_a = str(s.get('vit_ep_air','16')).replace(' mm', '')
+                         c_e, c_i = str(s.get('vit_couche_ext','Aucune')), str(s.get('vit_couche_int','Aucune'))
+                         sf_e = "FE" if "FE" in c_e else (" CS" if "CS" in c_e else "")
+                         sf_i = "FE" if "FE" in c_i else ""
+                         ty_e = str(s.get('vit_type_ext','Clair'))
+                         st_e = f" {ty_e}" if ty_e != "Clair" else ""
+                         ty_i = str(s.get('vit_type_int','Clair'))
+                         st_i = f" {ty_i}" if ty_i != "Clair" else ""
+                         gaz = str(s.get('vit_gaz','Argon')).upper()
+                         inter = str(s.get('vit_intercalaire','Alu')).upper()
+                         res_ui = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+                     elif vt_mode == "Simple Vitrage":
+                         res_ui = f"Simple {s.get('vit_ep_ext','4')} {s.get('vit_type_ext','Clair')}"
+                     else:
+                         res_ui = "Panneau Plein"
+                 except:
+                     res_ui = s.get('vit_resume', '-') # Fallback
+             
+             st.markdown(f"**Verre** : {res_ui}")
              if s.get('vit_pb_enable'):
                  st.markdown(f"**Petits bois** : {s.get('vit_pb_hor')}H x {s.get('vit_pb_vert')}V")
 
