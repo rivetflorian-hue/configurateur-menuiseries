@@ -4064,23 +4064,42 @@ def render_annexes():
                          
                          # V73: Revert to simple iframe as it worked locally.
                          # Height set to 1200px.
-                         # Add Direct Link for browsers blocking iframes or Mobile
+                         # JS Blob solution for Mobile/Secure Browsers
+                         import uuid
+                         func_id = f"open_pdf_{str(uuid.uuid4())[:8]}"
+                         
                          st.markdown(f'''
-                             <a href="data:application/pdf;base64,{base64_pdf}" target="_blank" style="
+                             <script>
+                                function {func_id}() {{
+                                    const b64 = "{base64_pdf}";
+                                    const bin = atob(b64);
+                                    const len = bin.length;
+                                    const arr = new Uint8Array(len);
+                                    for (let i = 0; i < len; i++) {{
+                                        arr[i] = bin.charCodeAt(i);
+                                    }}
+                                    const blob = new Blob([arr], {{type: "application/pdf"}});
+                                    const url = URL.createObjectURL(blob);
+                                    window.open(url, "_blank");
+                                }}
+                             </script>
+                             <button onclick="{func_id}()" style="
                                  display: inline-block;
                                  width: 100%;
                                  padding: 12px 20px;
                                  background-color: #ff4b4b;
                                  color: white;
-                                 text-decoration: none;
+                                 border: none;
+                                 cursor: pointer;
                                  text-align: center;
                                  border-radius: 8px;
                                  font-weight: bold;
                                  margin-bottom: 15px;
+                                 font-size: 16px;
                                  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                              ">
                                  📱 OUVRIR LE PDF EN PLEIN ÉCRAN
-                             </a>
+                             </button>
                          ''', unsafe_allow_html=True)
                          
                          pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
