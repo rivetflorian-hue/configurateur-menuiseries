@@ -541,20 +541,20 @@ def deserialize_config(data):
     # But for safety, we should clear dynamic keys
     # FIXED V73: Preserve 'mgr_sel_id' and 'active_config_id' to prevent loss of context
     # Also preserve 'uploader_json' to avoid re-triggering reload
-    keys_keep = ['project', 'mgr_sel_id', 'active_config_id', 'uploader_json']
+    keys_keep = ['project', 'mgr_sel_id', 'active_config_id', 'uploader_json', 'mode_module']
     keys_to_del = [k for k in st.session_state if k not in keys_keep]
     for k in keys_to_del:
         del st.session_state[k]
         
     # 2. Load new data
     for k, v in data.items():
-        # MORE ROBUST FILTERING on load
-        if isinstance(k, str) and ('btn' in k):
-            continue
-            
-        # Filter out buttons if they snuck in (Backwards compatibility)
-        if isinstance(k, str) and (k.endswith('_btn') or k.startswith('btn_')):
-            continue
+        # MORE ROBUST FILTERING on load (V10 FIX)
+        # Scrub button keys that cause Streamlit ValueAssignmentNotAllowedError
+        if isinstance(k, str):
+            if k.endswith('_btn') or k.startswith('btn_'): continue
+            if 'updup' in k or 'save_u' in k or 'del_u' in k or 'add_new' in k or 'upnew' in k: continue
+            # Specific known offenders (Added vit_upnew)
+            if k in ['vit_updup', 'vit_save_u', 'vit_del_u', 'vit_add_new', 'vit_upnew']: continue
             
         # FIXED V73: DEEP COPY on load to ensure UI edits don't mutate stored config in real-time.
         # This decouples the "Working Draft" (Session State) from the "Saved File" (Project Dict).
@@ -563,6 +563,61 @@ def deserialize_config(data):
         except Exception:
             # Fallback for non-copyable objects (rare in checking, but safe)
             st.session_state[k] = v
+
+# ... (omitted unrelated functions) ...
+
+def serialize_vitrage_config():
+    """Capture toutes les variables Vitrage pour la sauvegarde."""
+    # V10 FIX: Exclude ephemeral button keys from save
+    data = {}
+    for k, v in st.session_state.items():
+        if k.startswith('vit_'):
+            # Filter out known button keys (Added upnew)
+            if 'btn' in k or 'updup' in k or 'save_u' in k or 'del_u' in k or 'add_new' in k or 'upnew' in k:
+                continue
+            data[k] = v
+            
+    # FORCE RECALC RESUME (Fix for "None" or stale data)
+    # FORCE RECALC RESUME (Fix for "None" or stale data)
+    s = st.session_state
+    vt = s.get('vit_type_mode', 'Double Vitrage')
+    if vt == "Double Vitrage":
+        # Format V11: Vit. ep_ext / ep_air / ep_int - inter + GAZ gaz
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ep_i = s.get('vit_ep_int','4').replace(' mm', '')
+        ep_a = s.get('vit_ep_air','16').replace(' mm', '')
+        
+        c_e = s.get('vit_couche_ext','Aucune')
+        c_i = s.get('vit_couche_int','Aucune')
+        
+        sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+        sf_i = "FE" if "FE" in c_i else ""
+        
+        ty_e = s.get('vit_type_ext','Clair')
+        st_e = f" {ty_e}" if ty_e != "Clair" else ""
+        
+        ty_i = s.get('vit_type_int','Clair')
+        st_i = f" {ty_i}" if ty_i != "Clair" else ""
+        
+        gaz = s.get('vit_gaz','Argon').upper()
+        inter = s.get('vit_intercalaire','Alu').upper()
+        
+        resume = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+
+    elif vt == "Simple Vitrage":
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ty_e = s.get('vit_type_ext','Clair')
+        resume = f"Simple {ep_e} {ty_e}"
+    else:
+        resume = "Panneau Plein"
+    data['vit_resume'] = resume
+    
+    # Add Standard Keys for Project Management
+    # V11 FIX: Default to next Ref if missing
+    data['ref_id'] = st.session_state.get('vit_ref', get_next_project_ref())
+    data['qte_val'] = st.session_state.get('vit_qte', 1)
+    data['mode_module'] = 'Vitrage'
+    return data
         
 def add_config_to_project(data, ref_name):
     """Ajoute une configuration au projet."""
@@ -633,11 +688,11 @@ def render_top_navigation():
     st.markdown("---")
     
     # 2. Ligne Navigation : Mode & Liste Configs
-    c_mode, c_list = st.columns([1, 2])
+    c_mode, c_list = st.columns([2.5, 1.5]) # V74 Fix: More space to right
     
     with c_mode:
         # MODE SWITCH
-        nav_options = ["Menuiserie", "Habillage", "Volet Roulant"]
+        nav_options = ["Menuiserie", "Volet Roulant", "Vitrage", "Habillage"]
         current_mode = st.session_state.get('mode_module', 'Menuiserie')
         
         # Ensure valid
@@ -679,13 +734,11 @@ def render_top_navigation():
                 if target_id in options:
                     st.session_state['mgr_sel_id'] = target_id
             
+            # Ensure valid selection
             if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
                 st.session_state['mgr_sel_id'] = list(options.keys())[0]
                 
-            if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
-                st.session_state['mgr_sel_id'] = list(options.keys())[0]
-                
-            c_l_sel, c_l_btn = st.columns([2, 1])
+            c_l_sel, c_l_btn = st.columns([1.2, 0.8]) # V74 Fix: More button space
             sel_id = c_l_sel.selectbox(
                 "Configurations Enregistrées", 
                 options.keys(), 
@@ -722,7 +775,7 @@ def render_top_navigation():
                      if cc_yes.button("✅ OUI", use_container_width=True, key="btn_yes"):
                          target = next((c for c in configs if c['id'] == target_id), None)
                          if current_action == 'open' and target:
-                             keys_to_clear = [k for k in st.session_state.keys() if k.startswith(("vr_", "men_", "hab_", "active_reference", "vr_ref_in"))]
+                             keys_to_clear = [k for k in st.session_state.keys() if k.startswith(("vr_", "men_", "hab_", "vit_", "active_reference", "vr_ref_in"))]
                              for k in keys_to_clear: del st.session_state[k]
                              
                              deserialize_config(target["data"])
@@ -943,31 +996,32 @@ def flatten_tree(node, current_x, current_y, current_w, current_h):
 # --- HELPER: AUTO-INCREMENT REFERENCE (GLOBAL) ---
 def get_next_project_ref():
     """
-    Parcourt toutes les configurations du projet pour trouver le prochain numéro de repère disponible.
-    S'harmonise entre Menuiserie et Habillage.
-    Format par defaut: "Repère N"
+    Parcourt toutes les configurations pour trouver le prochain numéro.
+    V10 STRICT: Harmonisation globale "Repère N" (1, 2, 3...)
+    Ignorer les préfixes exotiques (V-, F-).
     """
     import re
     max_num = 0
-    pattern = re.compile(r'(\d+)$')
     
-    # 1. Check existing configs in project
+    # Analyze all existing refs to find ANY number 
+    # to continue the sequence "Repère N"
     if 'project' in st.session_state and 'configs' in st.session_state['project']:
-        for cfg in st.session_state['project']['configs']:
+        configs = st.session_state['project']['configs']
+        for cfg in configs:
             ref = cfg.get('ref', '')
-            match = pattern.search(ref)
+            # Capture any trailing number
+            match = re.search(r'(\d+)\s*$', ref)
             if match:
                 try:
                     num = int(match.group(1))
-                    if num > max_num:
-                        max_num = num
+                    if num > max_num: max_num = num
                 except:
                     pass
-                    
-    # 2. Check current active input (to avoid collision if user is typing)
-    # Actually, we want to suggest the NEXT available.
+
+    next_num = max_num + 1
     
-    return f"Repère {max_num + 1}"
+    # STRICT FORMAT: "Repère N"
+    return f"Repère {next_num}"
 
 def get_next_ref(current_ref):
     """
@@ -1324,6 +1378,18 @@ def reset_config(rerun=True):
     # Explicitly reset dimensions for default model (m1) to force UI update
     # even if widget key 'hab_m1_A' remains the same.
     st.session_state['hab_m1_A'] = 100
+    
+    # V9 FIX: AGGRESSIVE VITRAGE RESET
+    # Explicitly set WIDGET keys to Default Values to force UI reset
+    st.session_state['vit_w'] = 1000
+    st.session_state['vit_h'] = 1000
+    st.session_state['vit_ref_in'] = st.session_state['ref_id']
+    st.session_state['vit_qte_in'] = 1
+    
+    # Also clear other keys just in case
+    extra_keys = ['vit_obs_in', 'vit_hb']
+    for k in extra_keys:
+        if k in st.session_state: del st.session_state[k]
     
     # Clear any previous 'hab_m1_A' etc ??
     # Deletion loop above handles that.
@@ -3380,7 +3446,7 @@ def render_volet_form():
         c_ref, c_qte = st.columns([3, 1])
         with c_ref:
             # Repère editable
-            curr_ref = s.get('ref_id', 'VR-01')
+            curr_ref = s.get('ref_id', get_next_project_ref())
             new_ref_in = st.text_input("Repère", value=curr_ref, key="vr_ref_in")
             if new_ref_in != curr_ref:
                 s['ref_id'] = new_ref_in
@@ -3949,7 +4015,424 @@ def render_html_volet(s, svg_string, logo_b64):
 
 
 
-# --- MODULE ANNEXES (NOUVEAU) ---
+
+
+# ==============================================================================
+# --- MODULE VITRAGE (NOUVEAU) ---
+# ==============================================================================
+
+
+
+
+
+
+def serialize_vitrage_config():
+    """Capture toutes les variables Vitrage pour la sauvegarde."""
+    # V10 FIX: Exclude ephemeral button keys from save
+    data = {}
+    for k, v in st.session_state.items():
+        if k.startswith('vit_'):
+            # Filter out known button keys
+            if 'btn' in k or 'updup' in k or 'save_u' in k or 'del_u' in k or 'add_new' in k:
+                continue
+            data[k] = v
+            
+    # FORCE RECALC RESUME (Fix for "None" or stale data)
+    s = st.session_state
+    vt = s.get('vit_type_mode', 'Double Vitrage')
+    if vt == "Double Vitrage":
+        # Format V11: Vit. ep_ext / ep_air / ep_int - inter + GAZ gaz
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ep_i = s.get('vit_ep_int','4').replace(' mm', '')
+        ep_a = s.get('vit_ep_air','16').replace(' mm', '')
+        
+        c_e = s.get('vit_couche_ext','Aucune')
+        c_i = s.get('vit_couche_int','Aucune')
+        
+        sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+        sf_i = "FE" if "FE" in c_i else ""
+        
+        ty_e = s.get('vit_type_ext','Clair')
+        st_e = f" {ty_e}" if ty_e != "Clair" else ""
+        
+        ty_i = s.get('vit_type_int','Clair')
+        st_i = f" {ty_i}" if ty_i != "Clair" else ""
+        
+        gaz = s.get('vit_gaz','Argon').upper()
+        inter = s.get('vit_intercalaire','Alu').upper()
+        
+        resume = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+
+    elif vt == "Simple Vitrage":
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ty_e = s.get('vit_type_ext','Clair')
+        resume = f"Simple {ep_e} {ty_e}"
+    else:
+        resume = "Panneau Plein"
+    data['vit_resume'] = resume
+    
+    # Add Standard Keys for Project Management
+    # V11 FIX: Default to next Ref if missing
+    data['ref_id'] = st.session_state.get('vit_ref', get_next_project_ref())
+    data['qte_val'] = st.session_state.get('vit_qte', 1)
+    data['mode_module'] = 'Vitrage'
+    return data
+
+def render_vitrage_form():
+    """Formulaire de configuration Vitrage (Avancé)"""
+    s = st.session_state
+    
+    # 0. Sync Ref
+    if 'ref_id' not in s: s['ref_id'] = get_next_project_ref()
+
+    # 1. Repère et Quantité
+    with st.expander("📝 1. Repère et quantité", expanded=False):
+        c_ref, c_qte = st.columns([3, 1])
+        base_ref = s.get('ref_id', get_next_project_ref())
+        s['vit_ref'] = c_ref.text_input("Repère", value=base_ref, key="vit_ref_in")
+        s['ref_id'] = s['vit_ref']
+        s['vit_qte'] = c_qte.number_input("Qté", 1, 100, 1, key="vit_qte_in")
+
+    # 2. Matériaux et Cadre
+    with st.expander("🧱 2. Châssis & Support", expanded=False):
+        mat_options = ["Châssis aluminium", "Châssis PVC", "Châssis bois", "Chassis Acier", "Porte Sécurit", "Mur", "Vitrage Seul"]
+        curr_mat = s.get('vit_mat', "Châssis aluminium")
+        idx_mat = mat_options.index(curr_mat) if curr_mat in mat_options else 0
+        s['vit_mat'] = st.selectbox("Matériau", mat_options, index=idx_mat, key="vit_mat_sel")
+        
+        chassis_opts = []
+        if s['vit_mat'] == "Châssis aluminium": chassis_opts = ["Fixe", "Ouvrants", "Coulissant", "Basculant", "Mur rideau", "Verrière"]
+        elif s['vit_mat'] == "Châssis PVC": chassis_opts = ["Fixe", "Ouvrants"]
+        elif s['vit_mat'] == "Châssis bois": chassis_opts = ["Parecloses + Clous", "Mastic"]
+        elif s['vit_mat'] == "Chassis Acier": chassis_opts = ["Mastic", "Marquise", "Fer à T", "Châssis U"]
+        elif s['vit_mat'] == "Porte Sécurit": chassis_opts = ["Verre seul"]
+        elif s['vit_mat'] == "Mur": chassis_opts = ["A coller", "Rail haut et bas"]
+        else: chassis_opts = ["Standard"]
+            
+        s['vit_type_chassis'] = st.selectbox("Type de châssis", chassis_opts, key="vit_chas_sel")
+
+    # 3. Composition Vitrage (V9: CLOSED DEFAULT)
+    with st.expander("🔍 3. Composition Vitrage", expanded=False):
+        # Type de Vitrage Checkbox/Radio
+        vit_type_mode = st.radio("Type de Vitrage", ["Double Vitrage", "Simple Vitrage", "Panneau"], horizontal=True, key="vit_type_mode")
+        
+        c_ext, c_air, c_int = st.columns(3)
+        
+        # EXTÉRIEUR
+        with c_ext:
+            st.markdown("**Extérieur**")
+            s['vit_ep_ext'] = st.selectbox("Épaisseur Ext", ["4 mm", "6 mm", "8 mm", "10 mm", "33.2", "44.2", "SP10", "Panneau"], key="v_ep_e")
+            s['vit_type_ext'] = st.selectbox("Type Ext", ["Clair", "Dépoli", "Imprimé 200", "Granité", "Delta Mat", "Antelio"], key="v_ty_e")
+            s['vit_couche_ext'] = st.selectbox("Couche Ext", ["Aucune", "FE (Faible Émissivité)", "Contrôle Solaire"], key="v_co_e")
+            
+        # LAME D'AIR (Si Double)
+        with c_air:
+            if vit_type_mode == "Double Vitrage":
+                st.markdown("**Lame d'Air**")
+                s['vit_ep_air'] = st.selectbox("Épaisseur Air", ["6 mm", "8 mm", "10 mm", "12 mm", "14 mm", "16 mm", "18 mm", "20 mm"], index=7, key="v_ep_a")
+                s['vit_gaz'] = st.selectbox("Gaz", ["Argon", "Air", "Krypton"], key="v_gaz")
+                s['vit_intercalaire'] = st.selectbox("Intercalaire", ["Alu", "Warm Edge Noir", "Warm Edge Gris"], index=1, key="v_int_c")
+            else:
+                st.markdown("")
+                # V9 Polish: Removed Info
+                s['vit_ep_air'] = "-"
+                
+        # INTÉRIEUR
+        with c_int:
+            if vit_type_mode == "Double Vitrage":
+                st.markdown("**Intérieur**")
+                s['vit_ep_int'] = st.selectbox("Épaisseur Int", ["4 mm", "6 mm", "8 mm", "10 mm", "33.2", "44.2"], key="v_ep_i")
+                s['vit_type_int'] = st.selectbox("Type Int", ["Clair", "Dépoli"], key="v_ty_i")
+                s['vit_couche_int'] = st.selectbox("Couche Int", ["Aucune", "FE (Faible Émissivité)"], index=1, key="v_co_i")
+            else:
+                 st.markdown("")
+                 # V9 Polish: Removed Info
+
+        # Calcul Resume
+        if vit_type_mode == "Double Vitrage":
+            resume = f"{s['vit_ep_ext']} {s['vit_type_ext']} / {s['vit_ep_air']} {s['vit_gaz']} / {s['vit_ep_int']} {s['vit_type_int']}"
+            if s['vit_couche_ext'] != "Aucune": resume += f" [{s['vit_couche_ext']}]"
+            if s['vit_couche_int'] != "Aucune": resume += f" [{s['vit_couche_int']}]"
+        elif vit_type_mode == "Simple Vitrage":
+            resume = f"Simple {s['vit_ep_ext']} {s['vit_type_ext']}"
+        else:
+            resume = "Panneau Plein"
+        s['vit_resume'] = resume
+
+    # 4. Dimensions
+    with st.expander("📐 4. Dimensions & Petits bois", expanded=False):
+        dim_types = ["Cotes Fabrication", "Clair de vue", "Fond de feuillure"]
+        s['vit_dim_type'] = st.selectbox("Type de côtes", dim_types, key="vit_dim_t")
+        
+        c_w, c_h = st.columns(2)
+        s['vit_width'] = c_w.number_input("Largeur (mm)", 0, 10000, 1000, 10, key="vit_w")
+        s['vit_height'] = c_h.number_input("Hauteur (mm)", 0, 10000, 1000, 10, key="vit_h")
+        s['vit_h_bas'] = st.number_input("Hauteur bas du verre (mm)", 0, 5000, 0, 10, key="vit_hb")
+
+        # Petits bois
+        s['vit_pb_enable'] = st.checkbox("Petits bois (Traverses)", key="vit_pb_check")
+        if s['vit_pb_enable']:
+            c_pb1, c_pb2, c_pb3 = st.columns(3)
+            s['vit_pb_hor'] = c_pb1.number_input("Traver. Horiz.", 0, 20, 0, key="vit_pb_h")
+            s['vit_pb_vert'] = c_pb2.number_input("Traver. Vert.", 0, 20, 0, key="vit_pb_v")
+            s['vit_pb_thick'] = c_pb3.number_input("Épaisseur (mm)", 10, 50, 26, key="vit_pb_th")
+
+    # 5. Observations
+    with st.expander("📝 5. Observations", expanded=False):
+        s['vit_obs'] = st.text_area("Notes", value=s.get('vit_obs', ''), key="vit_obs_in")
+        
+    # --- ACTIONS CRUD ---
+    st.markdown("### 💾 Actions")
+    active_id = s.get('active_config_id')
+    if active_id: st.caption(f"✏️ Édition : {s.get('vit_ref', 'V-??')}")
+
+    c_btn0, c_btn1, c_btn2 = st.columns(3)
+    
+    # UPDATE
+    if active_id:
+        if c_btn0.button("💾 Mettre à jour", use_container_width=True, key="vit_upd"):
+             data = serialize_vitrage_config()
+             update_current_config_in_project(active_id, data, s['vit_ref'])
+             st.toast(f"✅ {s['vit_ref']} mis à jour !")
+             st.rerun()
+
+    # ADD & DUPLICATE
+    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="vit_updup"):
+        data = serialize_vitrage_config()
+        # New Ref
+        new_ref = s.get('vit_ref', 'V-01')
+        new_id = add_config_to_project(data, new_ref)
+        s['pending_new_id'] = new_id
+        # Auto Increment
+        s['pending_ref_id'] = get_next_ref(new_ref)
+        st.toast(f"✅ {new_ref} ajouté !")
+        st.rerun()
+
+    # ADD & NEW
+    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="vit_upnew"):
+        data = serialize_vitrage_config()
+        new_ref = s.get('vit_ref', 'V-01')
+        new_id = add_config_to_project(data, new_ref)
+        # s['pending_new_id'] = new_id # No selection needed for reset
+        st.toast(f"✅ {new_ref} enregistré !")
+        
+        # RESET
+        reset_config(rerun=False)
+        s['pending_ref_id'] = get_next_project_ref()
+        st.rerun()
+
+    return s
+
+
+
+
+
+
+
+
+
+
+def generate_svg_vitrage():
+    """Génère le dessin SVG Vitrage (Style Menuiserie V73) - V7 White + Axis Dims"""
+    s = st.session_state
+    
+    # 1. Setup Canvas
+    w_mm = s.get('vit_width', 1000)
+    h_mm = s.get('vit_height', 1000)
+    
+    # Visual Params
+    th_outer = 50
+    th_inner = 40
+    
+    margin = 250   # Marge large +
+    offset_top = 50
+    
+    vb_w = w_mm + (margin * 2.5) 
+    vb_h = h_mm + (margin * 2.5)
+    
+    x0 = margin
+    y0 = margin + offset_top
+    
+    svg_list = [] 
+    z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
+
+    # 2. Draw Outer Frame (White)
+    ox, oy = x0 - th_outer, y0 - th_outer
+    ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
+    
+    svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
+    svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+    svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+    svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+    svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+
+    # 3. Draw Inner Frame (Dormant White)
+    # V8: Lighter Stroke (#AAA) as requested
+    col_stroke = "#AAA"
+    svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
+    
+    ix, iy = x0 + th_inner, y0 + th_inner
+    iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
+    svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
+    
+    svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+    svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+    svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+    svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+
+    # 4. Glass
+    g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
+    svg_list.append((z_glass, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="{g_fill}" stroke="#888" stroke-width="1" />'))
+    
+    # 5. Petits Bois
+    if s.get('vit_pb_enable'):
+        nb_h = s.get('vit_pb_hor', 0)
+        nb_v = s.get('vit_pb_vert', 0)
+        thick = s.get('vit_pb_thick', 26)
+        
+        if nb_h > 0:
+            step_h = ih / (nb_h + 1)
+            for i in range(nb_h):
+                py = iy + step_h * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
+                if i == 0:
+                     h_gap = step_h
+                     # Anchor to Inner Right but push OUTSIDE Outer Frame
+                     dx_ref = x0 + w_mm + th_outer
+                     draw_dimension_line(svg_list, dx_ref, iy, dx_ref, iy + h_gap, int(h_gap), "", 50, "V", 20, z_dim)
+
+        if nb_v > 0:
+            step_v = iw / (nb_v + 1)
+            for i in range(nb_v):
+                px = ix + step_v * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
+                if i == 0:
+                     w_gap = step_v
+                     # Anchor to Inner Top but push OUTSIDE Outer Frame
+                     draw_dimension_line(svg_list, x0+th_inner, y0-th_outer, x0+th_inner+w_gap, y0-th_outer, int(w_gap), "", -60, "H", 20, z_dim)
+
+    # 6. Global Dimensions (V7 Axis Centered)
+    
+    # Axis Calculations (Middle of Dormant)
+    axis_left = x0 + (th_inner/2)
+    axis_right = (x0 + w_mm) - (th_inner/2)
+    axis_top = y0 + (th_inner/2)
+    axis_bottom = (y0 + h_mm) - (th_inner/2)
+    
+    # Width (Bottom) - Show Global Width but anchor leaders to Axis
+    draw_dimension_line(svg_list, 
+        axis_left, axis_bottom, 
+        axis_right, axis_bottom, 
+        int(w_mm), 
+        "", 160, "H", 32, z_dim, leader_fixed_start=axis_bottom)
+    
+    # Height (LEFT SIDE) - Show Global Height but anchor leaders to Axis
+    draw_dimension_line(svg_list, 
+        axis_left, axis_top, 
+        axis_left, axis_bottom, 
+        int(h_mm), 
+        "", 180, "V", 32, z_dim, leader_fixed_start=axis_left)
+    
+    # 7. Render
+    svg_list.sort(key=lambda x: x[0])
+    content = "".join([item[1] for item in svg_list])
+    
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
+
+
+def render_html_vitrage(s, svg_string, logo_b64):
+    """HTML Export for Vitrage"""
+    obs_html = ""
+    if s.get('vit_obs'):
+        obs_html = f"""
+            <div class="section-block">
+                <h3>Observations</h3>
+                <div class="panel" style="white-space: pre-wrap;">{s.get('vit_obs')}</div>
+            </div>
+        """
+    
+    # Calculate Resume if missing (Old Saves Fix)
+    # ALWAYS Calculate Resume from components to ensure no "None" is displayed
+    vt = s.get('vit_type_mode', 'Double Vitrage')
+    if vt == "Double Vitrage":
+        # Format: Vit. 4 / 20 / 4FE - WARM EDGE NOIR + GAZ ARGON
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ep_i = s.get('vit_ep_int','4').replace(' mm', '')
+        ep_a = s.get('vit_ep_air','16').replace(' mm', '')
+        
+        c_e = s.get('vit_couche_ext','Aucune')
+        c_i = s.get('vit_couche_int','Aucune')
+        
+        sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+        sf_i = "FE" if "FE" in c_i else ""
+        
+        ty_e = s.get('vit_type_ext','Clair')
+        st_e = f" {ty_e}" if ty_e != "Clair" else ""
+        
+        ty_i = s.get('vit_type_int','Clair')
+        st_i = f" {ty_i}" if ty_i != "Clair" else ""
+        
+        gaz = s.get('vit_gaz','Argon').upper()
+        inter = s.get('vit_intercalaire','Alu').upper()
+        
+        vit_resume = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+
+    elif vt == "Simple Vitrage":
+        ep_e = s.get('vit_ep_ext','4').replace(' mm', '')
+        ty_e = s.get('vit_type_ext','Clair')
+        vit_resume = f"Simple {ep_e} {ty_e}"
+    else:
+        vit_resume = "Panneau Plein"
+
+    style = """<style> body { font-family: sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } .section-block { margin-top: 20px; page-break-inside: avoid; } h3 { border-left: 5px solid #3498db; padding-left: 10px; color: #2c3e50; } .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; } table { width: 100%; border-collapse: collapse; } td { padding: 8px; border-bottom: 1px dotted #ccc; } .label { font-weight: bold; width: 40%; } </style>"""
+    
+    logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-height:80px;">' if logo_b64 else ""
+
+    html = f"""
+    <html>
+    <head>{style}</head>
+    <body>
+        <div class="header">
+            <div>
+                <h1 style="margin:0;">Fiche Vitrage</h1>
+                <h2 style="margin:5px 0 0 0; color:#555;">Ref: {s.get('vit_ref', 'V-01')}</h2>
+            </div>
+            <div>{logo_html}</div>
+        </div>
+        
+        <div class="section-block">
+            <h3>Caractéristiques</h3>
+            <div class="panel">
+                <table>
+                    <tr><td class="label">Quantité</td><td>{s.get('vit_qte', 1)}</td></tr>
+                    <tr><td class="label">Matériau</td><td>{s.get('vit_mat')}</td></tr>
+                    <tr><td class="label">Type Châssis</td><td>{s.get('vit_type_chassis')}</td></tr>
+                    <tr><td class="label">Dimensions</td><td>{s.get('vit_width')} x {s.get('vit_height')} mm</td></tr>
+                    <tr><td class="label">Type Côtes</td><td>{s.get('vit_dim_type')}</td></tr>
+                    <tr><td class="label">Verre</td><td>{vit_resume}</td></tr>
+                    <tr><td class="label">H. Bas Verre</td><td>{s.get('vit_h_bas')} mm</td></tr>
+                </table>
+            </div>
+        </div>
+        
+        <div class="section-block">
+            <h3>Plan Technique</h3>
+            <div style="text-align:center; padding: 20px;">
+                {svg_string}
+            </div>
+        </div>
+        
+        {obs_html}
+        
+        <div style="position: fixed; bottom: 0; width: 100%; text-align: center; font-size: 10px; color: #aaa; background: white; padding: 10px;">
+            Document généré automatiquement - Miroiterie Yerroise
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+
 # V73: BASE DE DONNEES DES ANNEXES
 ANNEXES_DB = {
     "Général": [
@@ -4195,6 +4678,9 @@ with c_config:
     elif current_mode == 'Volet Roulant':
         st.markdown("### 🧱 Options Volet Roulant")
         vr_config = render_volet_form()
+    elif current_mode == 'Vitrage':
+        st.markdown("### 🪟 Options Vitrage")
+        render_vitrage_form()
     else:
         st.markdown("### 🧱 Options Habillage")
         hab_config = render_habillage_form()
@@ -4372,6 +4858,44 @@ with c_preview:
             from streamlit.components.v1 import html
             html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
             
+    elif current_mode == 'Vitrage':
+        # 1. VISUALISATION
+        try:
+            svg_output = generate_svg_vitrage()
+            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Erreur SVG Vitrage: {e}")
+        
+        # 2. FICHE SUMMARY
+        st.markdown("### 📋 Fiche Vitrage")
+        st.markdown("---")
+        
+        s = st.session_state
+        c1, c2 = st.columns(2)
+        with c1:
+             st.markdown(f"**Repère** : {s.get('vit_ref')}")
+             st.markdown(f"**Quantité** : {s.get('vit_qte')}")
+             st.markdown(f"**Dimensions** : {s.get('vit_width')} x {s.get('vit_height')} mm")
+             st.markdown(f"**H. Bas** : {s.get('vit_h_bas')} mm")
+             
+        with c2:
+             st.markdown(f"**Matériau** : {s.get('vit_mat')}")
+             st.markdown(f"**Châssis** : {s.get('vit_type_chassis')}")
+             gls = s.get('vit_verre_custom') if s.get('vit_verre') == 'Autre' else s.get('vit_verre')
+             st.markdown(f"**Verre** : {gls}")
+             if s.get('vit_pb_enable'):
+                 st.markdown(f"**Petits bois** : {s.get('vit_pb_hor')}H x {s.get('vit_pb_vert')}V")
+
+        if s.get('vit_obs'):
+            st.markdown("---")
+            st.markdown(f"**Observations** : {s.get('vit_obs')}")
+            
+        st.markdown("---")
+        if st.button("🖨️ Impression Vitrage", use_container_width=True):
+            html_print = render_html_vitrage(st.session_state, svg_output, LOGO_B64 if 'LOGO_B64' in globals() else None)
+            from streamlit.components.v1 import html
+            html(f"<script>var w=window.open();w.document.write(`{html_print}`);w.document.close();w.print();</script>", height=0)
+
     else:
         # HABILLAGE PREVIEW
         if hab_config:
