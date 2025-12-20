@@ -6,15 +6,382 @@ import copy
 import pandas as pd
 import os
 import base64
+import datetime
 
-LOGO_B64 = "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"
 
+
+
+
+# Dynamic Logo Loader
+def load_logo():
+    try:
+        # Prefer cropped version if available
+        p_cropped = os.path.join(os.path.dirname(__file__), "assets/logo_miroiterie_cropped.jpg")
+        p_original = os.path.join(os.path.dirname(__file__), "assets/logo_miroiterie.jpg")
+        
+        p = p_cropped if os.path.exists(p_cropped) else p_original
+        
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+    except:
+        pass
+    return ""
+
+LOGO_B64 = load_logo()
 
 st.set_page_config(
     layout="wide", 
     page_title="Calculateur Menuiserie & Habillage", 
     initial_sidebar_state="collapsed"
 )
+
+
+# --- PDF GENERATION WITH REPORTLAB & SVGLIB (ROBUST) ---
+def generate_pdf_report(data_dict, svg_string=None):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.graphics import renderPDF
+        from svglib.svglib import svg2rlg
+        import io
+        import os
+        
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+        
+        # 1. LOGO (Haut Gauche)
+        # Gestion sécurisée: Si échec, on affiche un texte rouge
+        try:
+             # Try decoding as-is, then with padding fix if needed
+             try:
+                 logo_data = base64.b64decode(LOGO_B64, validate=True)
+             except:
+                 b64 = LOGO_B64
+                 b64 += "=" * ((4 - len(b64) % 4) % 4)
+                 logo_data = base64.b64decode(b64)
+             
+             logo_io = io.BytesIO(logo_data)
+             
+             from reportlab.lib.utils import ImageReader
+             img = ImageReader(logo_io)
+             iw, ih = img.getSize()
+             aspect = ih / float(iw)
+             draw_w = 150
+             draw_h = draw_w * aspect
+             c.drawImage(img, 40, height - 40 - draw_h, width=draw_w, height=draw_h, mask='auto', preserveAspectRatio=True)
+             
+        except Exception as e:
+            c.setFont("Helvetica-Oblique", 10)
+            c.setFillColor("red")
+            c.drawString(40, height - 60, f"[Erreur Logo: {str(e)}]")
+            c.setFillColor("black")
+
+        # 2. TITRE & INFOS
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(40, height - 100, f"Fiche Technique : {data_dict.get('ref_id', 'F1')}")
+        
+        c.setFont("Helvetica", 10)
+        c.drawString(40, height - 120, f"Projet: {data_dict.get('project', {}).get('name', 'P')}")
+        c.drawString(40, height - 135, f"Date: {datetime.datetime.now().strftime('%d/%m/%Y')}")
+
+        # 3. CONTENU TEXTE (Simplifié pour robustesse)
+        y_cursor = height - 160
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(40, y_cursor, "1. Caractéristiques Principales")
+        y_cursor -= 20
+        c.setFont("Helvetica", 10)
+        
+        # Info Block
+        infos = [
+            f"Dimensions: {data_dict.get('width_dorm', 0)} x {data_dict.get('height_dorm', 0)} mm",
+            f"Type: {data_dict.get('mat_type', 'PVC')} - {data_dict.get('pose_type', '-')}",
+            f"Couleur: Int {data_dict.get('col_in','-')} / Ext {data_dict.get('col_ex','-')}",
+            f"Dormant: {data_dict.get('frame_thig', 70)} mm",
+            f"Ailettes: {data_dict.get('fin_val', 0)} mm"
+        ]
+        
+        for line in infos:
+            c.drawString(50, y_cursor, f"• {line}")
+            y_cursor -= 15
+            
+        y_cursor -= 20
+        
+        # 4. SCHÉMA (SVG)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(40, y_cursor, "2. Plan Technique")
+        y_cursor -= 20
+        
+        if svg_string:
+            try:
+                # Convert string to BytesIO for svglib
+                svg_file = io.BytesIO(svg_string.encode('utf-8'))
+                drawing = svg2rlg(svg_file)
+                
+                # Scale logic
+                d_width = drawing.width
+                d_height = drawing.height
+                scale = min(500 / d_width, 300 / d_height)
+                drawing.scale(scale, scale)
+                
+                renderPDF.draw(drawing, c, 40, y_cursor - (d_height * scale))
+                y_cursor -= (d_height * scale + 40)
+            except Exception as e:
+                c.setFillColor("red")
+                c.drawString(40, y_cursor, f"[Erreur Schéma SVG: {str(e)}]")
+                c.setFillColor("black")
+                y_cursor -= 40
+        else:
+            c.drawString(40, y_cursor, "[Aucun schéma disponible]")
+            y_cursor -= 40
+
+        # Disclaimer
+        c.setFont("Helvetica-Oblique", 8)
+        c.setFillColor("gray")
+        c.drawCentredString(width/2, 30, "Document généré automatiquement - Miroiterie Yerroise")
+        
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+        return buffer, None # Success
+    except Exception as e:
+        # GLOBAL CRASH CATCHER
+        return None, f"{str(e)}" # Return error details
+
+def render_html_menuiserie(s, svg_string, logo_b64):
+    """HTML generation for Menuiserie printing (Full Width Bottom Plan)."""
+    
+    css = """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        
+        .page-container { 
+            max-width: 210mm; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+
+        /* STACKED LAYOUT (Sections) */
+        .section-block { margin-bottom: 25px; break-inside: avoid; }
+        
+        /* HEADINGS */
+        h3 { 
+            font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; 
+            border-left: 5px solid #3498db; padding-left: 10px; 
+            line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        
+        /* PANELS */
+        .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dotted #ccc; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; }
+        
+        /* ZONES TABLE (Full Width) */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 5px; }
+        th { background: #cfd8dc; color: #2c3e50; padding: 6px; text-align: left; text-transform: uppercase; font-size: 10px; }
+        td { border-bottom: 1px solid #eee; padding: 8px 12px; color: #333; line-height: 1.4; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+
+        /* BOTTOM SECTION (PLAN) */
+        .visual-box {
+            border: none; margin-top: 20px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative;
+            width: 100%; height: 800px; /* Reduced to fit on Page 2 with Title */
+            page-break-inside: avoid;
+        }
+        /* Allow SVG to take more space */
+        .visual-box svg { height: 100%; width: auto; max-width: 98%; }
+        
+        .footer { 
+            position: fixed; bottom: 10mm; left: 0; right: 0;
+            font-size: 9px; color: #999; text-align: center; 
+        }
+
+        @media print {
+            @page { size: A4; margin: 12mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
+            .no-print { display: none; }
+            h3 { break-after: avoid; }
+            /* Explicit Page Breaks with Safety Margin */
+            .page-break { page-break-before: always; padding-top: 30px; }
+        }
+    </style>
+    """
+    
+    # Logo
+    logo_html = f"<h1>Fiche Technique</h1>"
+    if logo_b64:
+        logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
+        
+    # Zones Processing
+    w_d = s.get('width_dorm', 1000)
+    h_d = s.get('height_dorm', 1000)
+    flat = flatten_tree(s.get('zone_tree'), 0,0,w_d,h_d)
+    real = [z for z in flat if z['type'] != 'split']
+    sorted_zones = sorted(real, key=lambda z: (z['y'], z['x']))
+    
+    # Common Factorization Logic (For Print)
+    common_specs = {}
+    if sorted_zones:
+         first_type = sorted_zones[0]['type']
+         if all(z['type'] == first_type for z in sorted_zones): common_specs['Type'] = first_type
+         
+         def get_vit(zparams): return str(zparams.get('vitrage_resume', '-')).replace('\n', ' ')
+         first_vit = get_vit(sorted_zones[0]['params'])
+         if all(get_vit(z['params']) == first_vit for z in sorted_zones): common_specs['Vitrage'] = first_vit
+         
+         def get_grille(zparams): return zparams.get('pos_grille', 'Aucune')
+         first_grille = get_grille(sorted_zones[0]['params'])
+         if all(get_grille(z['params']) == first_grille for z in sorted_zones): 
+             if first_grille != "Aucune": common_specs['Ventilation'] = first_grille
+    
+    z_rows = ""
+    for z in sorted_zones:
+        # Compact Line Building
+        parts = [f"<strong>{z['label']}</strong> : {int(z['w'])} x {int(z['h'])} mm"]
+        
+        # Specifics
+        if 'Type' not in common_specs: parts.append(f"Type: {z['type']}")
+        
+        v_curr = get_vit(z['params'])
+        if 'Vitrage' not in common_specs: parts.append(f"Vitrage: {v_curr}")
+        
+        # Options
+        opts = []
+        if 'sens' in z['params']: opts.append(f"Sens {z['params']['sens']}")
+        
+        g_curr = get_grille(z['params'])
+        if 'Ventilation' not in common_specs and g_curr != "Aucune": opts.append(f"VMC: {g_curr}")
+        
+        if z['params'].get('h_poignee', 0) > 0: opts.append(f"HP {z['params']['h_poignee']}mm")
+        
+        nb_h = z['params'].get('traverses', 0)
+        nb_v = z['params'].get('traverses_v', 0)
+        if nb_h > 0:
+             ep_t = z['params'].get('epaisseur_traverse', 20)
+             opts.append(f"Trav. {nb_h}H (Ep.{ep_t})")
+             if nb_h == 1 and nb_v == 0:
+                 opts.append(f"Remp. H:{z['params'].get('remp_haut','V')}/B:{z['params'].get('remp_bas','P')}")
+        if nb_v > 0:
+             opts.append(f"PB {nb_v}V")
+        
+        if opts: parts.append(f"Options: {', '.join(opts)}")
+        
+        full_line = " • ".join(parts)
+        # More padding for comfort
+        z_rows += f"<tr><td>{full_line}</td></tr>"
+
+    # Pre-calc values
+    ref_id = s.get('ref_id', 'F1')
+    
+    # Calc dimensions for Global Panel
+    w_rec = w_d + (2 * s.get('fin_val', 0))
+    h_bot_add = s.get('width_appui', 0) if s.get('is_appui_rap', False) else (s.get('fin_bot', 0) if not s.get('same_bot', False) else s.get('fin_val', 0))
+    h_rec = h_d + s.get('fin_val', 0) + h_bot_add
+
+    # Format Ailettes String
+    if s.get('fin_val', 0) > 0:
+        ail_str = f"{s.get('fin_val',0)}mm (H/G/D) / {s.get('fin_bot', 0) if not s.get('same_bot') else s.get('fin_val',0)}mm (Bas)"
+    else:
+        ail_str = "Sans"
+
+    # Format Common Specs String
+    common_str = ""
+    for k,v in common_specs.items():
+        common_str += f"<div class='panel-row'><span class='lbl'>{k} (Commun)</span> <span class='val'>{v}</span></div>"
+
+    import datetime
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>{css}</head>
+    <body>
+        <div class="page-container">
+            <!-- HEADER -->
+            <div class="header">
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">Menuiserie {s.get('mat_type', 'PVC')}</div>
+                </div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE CHANTIER</div>
+                    <div class="ref">{ref_id}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
+            </div>
+            
+            <!-- STACKED SECTIONS -->
+            
+            <!-- 1. INFORMATIONS GENERALES -->
+            <div class="section-block">
+                <h3>Informations Générales</h3>
+                <div class="panel">
+                    <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
+                    <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('qte_val', 1)}</span></div>
+                    <div class="panel-row"><span class="lbl">Projet</span> <span class="val">{s.get('proj_type', 'Rénovation')}</span></div>
+                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('mat_type', 'PVC')}</span></div>
+                    <div class="panel-row"><span class="lbl">Pose</span> <span class="val">{s.get('pose_type')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dormant</span> <span class="val">{s.get('frame_thig')} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Ailettes</span> <span class="val">{ail_str}</span></div>
+                    <div class="panel-row"><span class="lbl">Appui</span> <span class="val">{'OUI ('+str(s.get('width_appui'))+'mm)' if s.get('is_appui_rap') else 'NON'}</span></div>
+                    <div class="panel-row"><span class="lbl">Couleur</span> <span class="val">{s.get('col_in')} (Int) / {s.get('col_ex')} (Ext)</span></div>
+                    <div class="panel-row"><span class="lbl">Type Côtes</span> <span class="val">{s.get('dim_type', 'Tableau')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dos Dormant</span> <span class="val">{w_d} x {h_d} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Recouvrement</span> <span class="val">{w_rec} x {h_rec} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Allège</span> <span class="val">{s.get('h_allege', 0)} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Volet R.</span> <span class="val">{'OUI ('+str(int(s.get('vr_h',0)))+'mm)' if s.get('vr_enable') else 'NON'}</span></div>
+                    {common_str}
+                </div>
+            </div>
+            
+            <!-- 2. DETAILS DES ZONES -->
+            <div class="section-block">
+                <h3>Détails des Zones</h3>
+                <div class="panel">
+                    <table>
+                        <tbody>{z_rows}</tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 3. PLAN TECHNIQUE (New Page) -->
+            <div class="page-break">
+                <h3>Plan Technique</h3>
+                <div class="visual-box">
+                    {svg_string}
+                    <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue extérieure - Cotes tableau en mm</div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise<br>
+                Merci de vérifier les cotes avant validation définitive.
+            </div>
+        </div>
+        <script>
+            setTimeout(() => {{ window.print(); }}, 800);
+        </script>
+    </body>
+    </html>
+    """
+    return html
 
 # --- CSS MOBILE & PRINT FIX ---
 st.markdown("""
@@ -213,7 +580,7 @@ def render_top_navigation():
     """Affiche la navigation supérieure (Projet, Mode, Liste)."""
     
     # 1. Ligne Supérieure : Nom Projet & Imports
-    c_proj, c_imp = st.columns([3, 1])
+    c_proj, c_imp = st.columns([3, 1], vertical_alignment="bottom")
     
     with c_proj:
         # Style 'Title' for Project Name
@@ -521,19 +888,30 @@ def flatten_tree(node, current_x, current_y, current_w, current_h):
             
         flat_zones.append(z)
     elif node['type'] == 'split':
+        # Retrieve Traverse Thickness (Default 0 if new/legacy, but UI forces default)
+        # Safely default to 0 if missing, to match old logic, but UI sets it to dormant.
+        # Check UI initialization to be sure, or here.
+        trav_th = int(node.get('traverse_thickness', 0))
+        
         # Check substrings because radio value contains extra text
         if "Horizontale" in node['split_type']:
             # Split value is height of the top/left child
             h1 = node['split_value']
-            h2 = current_h - h1
+            # h2 is remaining height MINUS traverse thickness
+            # Ensure we don't go negative
+            h2 = max(0, current_h - h1 - trav_th)
+            
             flat_zones.extend(flatten_tree(node['children'][0], current_x, current_y, current_w, h1))
-            flat_zones.extend(flatten_tree(node['children'][1], current_x, current_y + h1, current_w, h2))
+            # Offset second child by h1 + thickness
+            flat_zones.extend(flatten_tree(node['children'][1], current_x, current_y + h1 + trav_th, current_w, h2))
         else: # Verticale
             # Split value is width of the top/left child
             w1 = node['split_value']
-            w2 = current_w - w1
+            w2 = max(0, current_w - w1 - trav_th)
+            
             flat_zones.extend(flatten_tree(node['children'][0], current_x, current_y, w1, current_h))
-            flat_zones.extend(flatten_tree(node['children'][1], current_x + w1, current_y, w2, current_h))
+            # Offset second child by w1 + thickness
+            flat_zones.extend(flatten_tree(node['children'][1], current_x + w1 + trav_th, current_y, w2, current_h))
     return flat_zones
 
 # --- HELPER: AUTO-INCREMENT REFERENCE (GLOBAL) ---
@@ -575,8 +953,25 @@ def get_next_ref(current_ref):
 
 # --- HELPER: GENERATION DU SVG (PARTIE 3 - CUSTOM PROFILES) ---
 TYPES_OUVRANTS = ["Fixe", "1 Vantail", "2 Vantaux", "Coulissant", "Soufflet"]
-VITRAGES_INT = ["4mm", "33.2 (Sécurité)", "44.2 (Effraction)", "44.2 Silence"]
-VITRAGES_EXT = ["4mm", "6mm", "SP10 (Anti-effraction)", "Granité"]
+
+# Listes de données Vitrage (NEW V75)
+EPAISSEURS = ["3 mm", "4 mm", "5 mm", "6 mm", "8 mm", "10 mm", "12 mm"]
+FEUILLETES = ["33.2", "44.2", "SP10", "55.2", "SP512", "66.2", "SP514", "SP615B", "88.2", "10.10.2", "12.12.2"]
+ALL_GLASS = EPAISSEURS + FEUILLETES
+
+TYPES_VERRE = ["Clair", "Imprimé 200", "Dépoli", "Armé"]
+
+VIDE_AIR = ["6 mm", "8 mm", "10 mm", "12 mm", "14 mm", "16 mm", "18 mm", "20 mm", "24 mm"]
+
+INTERCALAIRES = [
+    "Alu Standard", "Alu Blanc", "Alu Noir",
+    "Warm Edge Noir", "Warm Edge Blanc",
+    "Swisspacer Blanc", "Swisspacer Noir"
+]
+
+# Règles de couches
+COUCHES_INT = ["Aucune", "FE (Faible Émissivité)"]
+COUCHES_EXT = ["Aucune", "SUN", "CS 70/30", "CS 60/40"]
 
 def config_zone_ui(label, key_prefix, current_node_type="Fixe"):
     # REMOVED EXPANDER to avoid nesting issues
@@ -621,21 +1016,101 @@ def config_zone_ui(label, key_prefix, current_node_type="Fixe"):
         st.info("Poignée : Centrée en traverse haute (Fixe)")
     
     with st.expander(f"⚙️ Finitions {label}"):
-        p['traverses'] = st.number_input("Traverses Horiz.", 0, 5, 0, key=f"{key_prefix}_trav")
-        if p['traverses'] == 1:
-            p['pos_traverse'] = st.radio("Position", ["Centrée", "Sur mesure (du bas)"], horizontal=True, key=f"{key_prefix}_pos_t")
-            if p['pos_traverse'] == "Sur mesure (du bas)":
-                p['h_traverse_custom'] = st.number_input("Cote axe depuis bas (mm)", 100, 2000, 800, 10, key=f"{key_prefix}_h_t")
-            cr1, cr2 = st.columns(2)
-            p['remp_haut'] = cr1.radio("Remplissage HAUT", ["Vitrage", "Panneau"], key=f"{key_prefix}_rh")
-            p['remp_bas'] = cr2.radio("Remplissage BAS", ["Panneau", "Vitrage"], key=f"{key_prefix}_rb")
+        ct1, ct2 = st.columns(2)
+        p['traverses'] = ct1.number_input("Traverses Horiz.", 0, 10, 0, key=f"{key_prefix}_trav")
+        p['traverses_v'] = ct2.number_input("Traverses Vert.", 0, 10, 0, key=f"{key_prefix}_trav_v")
+        
+        nb_h = p['traverses']
+        nb_v = p['traverses_v']
+        
+        if nb_h > 0 or nb_v > 0:
+            # Common Thickness
+            p['epaisseur_traverse'] = st.number_input("Épaisseur Traverse (mm)", 10, 100, 20, step=5, key=f"{key_prefix}_eptrav")
+            
+            # MODE SOUBASSEMENT (Strictly 1 H, 0 V)
+            if nb_h == 1 and nb_v == 0:
+                p['pos_traverse'] = st.radio("Position", ["Centrée", "Sur mesure (du bas)"], horizontal=True, key=f"{key_prefix}_pos_t")
+                if p['pos_traverse'] == "Sur mesure (du bas)":
+                    p['h_traverse_custom'] = st.number_input("Cote axe depuis bas (mm)", 100, 2000, 800, 10, key=f"{key_prefix}_h_t")
+                cr1, cr2 = st.columns(2)
+                p['remp_haut'] = cr1.radio("Remplissage HAUT", ["Vitrage", "Panneau"], key=f"{key_prefix}_rh")
+                p['remp_bas'] = cr2.radio("Remplissage BAS", ["Panneau", "Vitrage"], key=f"{key_prefix}_rb")
+            else:
+                # MODE PETITS BOIS (Grid)
+                st.info(f"Grille décorative : {nb_h} Horiz. x {nb_v} Vert.")
+                p['remplissage_global'] = st.radio("Remplissage Global", ["Vitrage", "Panneau"], horizontal=True, key=f"{key_prefix}_rg_grid")
         else:
             p['remplissage_global'] = st.radio("Remplissage Global", ["Vitrage", "Panneau"], horizontal=True, key=f"{key_prefix}_rg")
         
         st.markdown("🔍 **Composition Vitrage**")
-        cv1, cv2 = st.columns(2)
-        p['vitrage_ext'] = cv1.selectbox("Face Ext.", VITRAGES_EXT, key=f"{key_prefix}_ve")
-        p['vitrage_int'] = cv2.selectbox("Face Int.", VITRAGES_INT, key=f"{key_prefix}_vi")
+        
+        # --- NEW GLAZING CONFIGURATION ---
+        
+        # 1. Selection Mode: Simple vs Double
+        p['type_vitrage'] = st.radio("Type de Vitrage", ["Double Vitrage", "Simple Vitrage"], horizontal=True, key=f"{key_prefix}_tv")
+        
+        if p['type_vitrage'] == "Double Vitrage":
+            c_v1, c_v2, c_v3 = st.columns(3)
+            
+            # COL 1 : EXTERIEUR (Swapped as requested)
+            with c_v1:
+                st.caption("Extérieur")
+                # Default: 4mm (Index 1), Clair (Index 0)
+                p['vitrage_ext_ep'] = st.selectbox("Épaisseur Ext", ALL_GLASS, index=1, key=f"{key_prefix}_veep")
+                p['vitrage_ext_type'] = st.selectbox("Type Ext", TYPES_VERRE, index=0, key=f"{key_prefix}_vety")
+                p['vitrage_ext_couche'] = st.selectbox("Couche Ext", COUCHES_EXT, index=0, key=f"{key_prefix}_veco")
+                
+            # COL 2 : INTERCALAIRE / AIR
+            with c_v2:
+                st.caption("Lame d'Air")
+                # Default: 20mm (Index 7), Warm Edge Noir (Index 3)
+                p['vide_air_ep'] = st.selectbox("Épaisseur Air", VIDE_AIR, index=7, key=f"{key_prefix}_vae")
+                p['intercalaire_type'] = st.selectbox("Intercalaire", INTERCALAIRES, index=3, key=f"{key_prefix}_intc")
+                
+            # COL 3 : INTERIEUR
+            with c_v3:
+                st.caption("Intérieur")
+                # Default: 4mm (Index 1), Clair (Index 0), FE (Index 1)
+                p['vitrage_int_ep'] = st.selectbox("Épaisseur Int", ALL_GLASS, index=1, key=f"{key_prefix}_viep")
+                p['vitrage_int_type'] = st.selectbox("Type Int", TYPES_VERRE, index=0, key=f"{key_prefix}_vity")
+                p['vitrage_int_couche'] = st.selectbox("Couche Int", COUCHES_INT, index=1, key=f"{key_prefix}_vico")
+            
+            # FORMULA GENERATION: "4 / 20 / 4FE - WARM EDGE NOIR + GAZ ARGON"
+            ep_ext = p['vitrage_ext_ep'].replace(' mm', '').strip()
+            # Clean Couche Ext
+            c_ext = p['vitrage_ext_couche']
+            c_ext_str = "" if c_ext == "Aucune" else c_ext.replace("CS ", "CS").split(' ')[0] # Simplify
+            
+            air = p['vide_air_ep'].replace(' mm', '').strip()
+            
+            ep_int = p['vitrage_int_ep'].replace(' mm', '').strip()
+            # Clean Couche Int
+            c_int = p['vitrage_int_couche']
+            c_int_str = "" if c_int == "Aucune" else "FE" # Force FE notation
+            
+            inter = p['intercalaire_type'].upper()
+            
+            # Build parts
+            # Ext part: "4" or "4SUN"
+            part_ext = f"{ep_ext}{c_ext_str}"
+            # Int part: "4FE"
+            part_int = f"{ep_int}{c_int_str}"
+            
+            p['vitrage_resume'] = f"{part_ext} / {air} / {part_int} - {inter} + GAZ ARGON"
+            
+        else: # Simple Vitrage
+            c_v1, _ = st.columns([1, 2])
+            with c_v1:
+                st.caption("Vitrage Unique")
+                p['vitrage_simple_ep'] = st.selectbox("Épaisseur", ALL_GLASS, key=f"{key_prefix}_vsep")
+                p['vitrage_simple_type'] = st.selectbox("Type", TYPES_VERRE, key=f"{key_prefix}_vsty")
+                p['vitrage_simple_couche'] = st.selectbox("Couche", ["Aucune", "FE", "SUN", "CS 70/30"], key=f"{key_prefix}_vsco")
+            
+            p['vitrage_resume'] = f"{p['vitrage_simple_ep']} {p['vitrage_simple_type']} {p['vitrage_simple_couche']}"
+
+        # Compatibility Keys (Keep existing keys for SVG if needed)
+        p['vitrage_ext'] = p.get('vitrage_ext_type', 'V.Ext') 
+        p['vitrage_int'] = p.get('vitrage_int_type', 'V.Int')
 
         st.markdown("💨 **Ventilation**")
         opts_grille = ["Aucune", "Vtl Principal"]
@@ -729,6 +1204,24 @@ def render_node_ui(node, w_ref, h_ref, level=0, counter=None):
                 node['children'] = []
                 node['zone_params'] = init_node('temp')['zone_params']
                 st.rerun()
+
+            # TRAVERSE THICKNESS (New V22)
+            # Default to 0 to avoid huge gaps (User Feedback: "70mm en trop")
+            # The sash frame itself provides visual thickness.
+            
+            # MIGRATION: If value is 70 (Old Default), force it to 0
+            current_th = int(node.get('traverse_thickness', 0))
+            if current_th == 70:
+                node['traverse_thickness'] = 0
+                
+            if 'traverse_thickness' not in node:
+                node['traverse_thickness'] = 0
+                
+            node['traverse_thickness'] = st.number_input(
+                "Épaisseur Traverse / Meneau (mm)", 
+                min_value=0, max_value=200, value=int(node['traverse_thickness']), step=5,
+                key=f"{prefix}_trav_th"
+            )
     
             # Recursively render children INSIDE this expander box
             if "Verticale" in node['split_type']:
@@ -873,13 +1366,15 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
     
     # Helper interne pour dessiner un "bloc vitré/panneau"
     def draw_leaf_interior(lx, ly, lw, lh, z_start=None):
-        nb_trav = params.get('traverses', 0)
+        nb_h = params.get('traverses', 0)
+        nb_v = params.get('traverses_v', 0)
         z_eff = z_start if z_start is not None else z_base
         
-        if nb_trav == 1:
+        # MODE SOUBASSEMENT (Strictly 1 H, 0 V)
+        if nb_h == 1 and nb_v == 0:
             pos_trav = params.get('pos_traverse', 'Centrée')
             h_custom = params.get('h_traverse_custom', 800)
-            ep_trav = 20
+            ep_trav = params.get('epaisseur_traverse', 20) # V73 FIX: Used input value
             
             if pos_trav == "Sur mesure (du bas)":
                 y_center = (ly + lh) - h_custom
@@ -902,18 +1397,43 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
             
             draw_rect(svg, lx, y_trav_start, lw, ep_trav, c_frame, "black", 1, z_eff+2)
             
+            # --- COTE HAUTEUR TRAVERSE (V74 FIX) ---
+            ltx = lx + lw - 30 
+            if pos_trav == "Sur mesure (du bas)":
+               # Cote depuis le bas
+               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_custom, "", -10, "V", font_size=16, z_index=z_eff+10)
+            else:
+               h_reel_bas = (ly+lh) - y_center
+               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_reel_bas, "", -10, "V", font_size=16, z_index=z_eff+10)
+
         else:
-            remp_glob = params.get('remplissage_global', 'Vitrage')
-            # DEBUG removed
+            # MODE GLOBAL / PETITS BOIS (GRID)
+            remp_glob = params.get('remplissage_global', 'Vitrage') or params.get('remplissage_global', 'Vitrage') # Fallback
+            # Note: config_zone_ui uses 'remplissage_global' for grid too.
+            
             col_g = "#F0F0F0" if remp_glob == "Panneau" else config_global['color_glass']
-            # z_eff = 50
             draw_rect(svg, lx, ly, lw, lh, col_g, "black", 1, z_eff+1)
             
-            if nb_trav > 1:
-                section_h = lh / (nb_trav + 1)
-                for k in range(1, nb_trav + 1):
-                    ty = ly + (section_h * k) - 10 
-                    draw_rect(svg, lx, ty, lw, 20, c_frame, "black", 1, z_eff+2)
+            # Only draw grid if there are traverses
+            if nb_h > 0 or nb_v > 0:
+                ep_trav = params.get('epaisseur_traverse', 20)
+                
+                # DRAW HORIZONTAL
+                if nb_h > 0:
+                    section_h = lh / (nb_h + 1)
+                    for k in range(1, nb_h + 1):
+                        ty = ly + (section_h * k) - (ep_trav/2)
+                        draw_rect(svg, lx, ty, lw, ep_trav, c_frame, "black", 1, z_eff+2)
+                
+                # DRAW VERTICAL
+                if nb_v > 0:
+                    section_w = lw / (nb_v + 1)
+                    for k in range(1, nb_v + 1):
+                        tx = lx + (section_w * k) - (ep_trav/2)
+                        # Vertical bar spans full height (crosses horizontal)
+                        # Or should it be cut? Usually petits bois are continuous or mortised.
+                        # Drawing V on top or below H implies joint type. To keep simple, draw V full height.
+                        draw_rect(svg, tx, ly, ep_trav, lh, c_frame, "black", 1, z_eff+2)
 
     # --- TYPES OUVRANTS ---
     if type_ouv == "Fixe":
@@ -943,10 +1463,16 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
         
         # Position X dependent on hinges (Sens)
         # Handle axis approx 28mm (Center of 55mm sash)
-        vis_axis_offset = 28 
+        # V74 FIX: Center handle EXACTLY on the Sash Profile (Not Frame)
+        # Frame (Dormant) = 24mm (adj). 
+        # Total visible (Dormant + Sash) = 55mm (vis_ouvrant).
+        # Sash Profile Width = 55 - 24 = 31mm.
+        # Center of Sash = 24 + (31/2) = 39.5mm.
         
-        if sens == 'TG': x_h_vis = x + w - vis_axis_offset
-        else: x_h_vis = x + vis_axis_offset
+        handle_offset_edge = 39.5 
+        
+        if sens == 'TG': x_h_vis = x + w - handle_offset_edge
+        else: x_h_vis = x + handle_offset_edge
             
         if hp_val > 0:
             draw_handle_icon(svg, x_h_vis, y_h_vis, z_index=z_base+8)
@@ -961,14 +1487,33 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
         # V73: Inset sash to show dormant frame "Liseret"
         adj = 24
         
+        # VISUAL FIX: Reduce central thickness (Battement)
+        # Standard vis_ouvrant is 55. If sides are 55, center is 110 (Too thick).
+        # We cheat by using a smaller visual for the central stiles.
+        vis_middle = 35 # 35+35 = 70mm central block (vs 110mm)
+        
         # Left Sash
         draw_rect(svg, x+adj, y+adj, w_vtl-adj, h-2*adj, c_frame, "black", 1, z_base) 
         # Right Sash
         draw_rect(svg, x+w_vtl, y+adj, w_vtl-adj, h-2*adj, c_frame, "black", 1, z_base) 
         
         # Intérieurs
-        draw_leaf_interior(x+vis_ouvrant, y+vis_ouvrant, w_vtl-2*vis_ouvrant, h-2*vis_ouvrant)
-        draw_leaf_interior(x+w_vtl+vis_ouvrant, y+vis_ouvrant, w_vtl-2*vis_ouvrant, h-2*vis_ouvrant)
+        # LEFT SASH: Left=55 (Normal), Right=35 (Thinner)
+        # Width of glass = SashWidth - LeftProfile - RightProfile
+        # SashWidth = w_vtl - adj (approx, due to rect logic above).
+        # Wait, draw_leaf_interior draws RELATIVE to the provided box.
+        # But here we provide explicit coordinates.
+        
+        # Canvas for Left Interior:
+        # X start: x + vis_ouvrant
+        # Width: (w_vtl) - vis_ouvrant (left) - vis_middle (right)
+        # Note: w_vtl is the half-width.
+        
+        # Visual correction:
+        draw_leaf_interior(x+vis_ouvrant, y+vis_ouvrant, w_vtl - vis_ouvrant - vis_middle, h-2*vis_ouvrant)
+        
+        # RIGHT SASH: Left=35 (Thinner), Right=55 (Normal)
+        draw_leaf_interior(x+w_vtl+vis_middle, y+vis_ouvrant, w_vtl - vis_middle - vis_ouvrant, h-2*vis_ouvrant)
         
         svg.append((z_base+6, f'<line x1="{x+w_vtl}" y1="{y}" x2="{x+w_vtl}" y2="{y+h}" stroke="black" stroke-width="1" />'))
         
@@ -986,31 +1531,29 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
         
         if is_princ_right:
             # Principal Droite -> Poignée à Gauche du vantail droit (Central)
-            x_h_vis = (x + w_vtl) + 28
+            # V74 FIX: Centered on vis_middle (35mm)
+            # x + w_vtl is the split. Right sash starts there.
+            # Its left stile is vis_middle (35). Center is 17.5.
+            x_h_vis = (x + w_vtl) + 17.5 
         else:
             # Principal Gauche -> Poignée à Droite du vantail gauche (Central)
-            x_h_vis = (x + w_vtl) - 28
+            # V74 FIX: Centered on vis_middle (35mm)
+            # x + w_vtl is the split. Left sash ends there.
+            # Its right stile is vis_middle (35). Center is 17.5 from edge.
+            x_h_vis = (x + w_vtl) - 17.5
             
         if hp_val > 0:
             draw_handle_icon(svg, x_h_vis, y_h_vis, z_index=z_base+8)
             
             # HANDLE ON SECONDARY SASH (VS) - Symmetric
-            # If VP is Right (handle on Left of VP), VS is Left (handle on Right of VS).
-            # If VP is Left (handle on Right of VP), VS is Right (handle on Left of VS).
-            
-            # Simply put: 2 Vantaux always meet in the center.
-            # Handle on Left Sash is on its Right Stile.
-            # Handle on Right Sash is on its Left Stile.
-            
-            # Let's calculate VS position
             if is_princ_right:
-                # VS is Left Sash. Handle on Right side of VS.
-                x_h_vs = (x + w_vtl) - 28
-                # Same Y
+                # VS is Left Sash. Handle on Right side of VS (Central).
+                # Same X logic as "Principal Gauche" handle.
+                x_h_vs = (x + w_vtl) - 17.5
                 draw_handle_icon(svg, x_h_vs, y_h_vis, z_index=z_base+8)
             else:
-                # VS is Right Sash. Handle on Left side of VS.
-                x_h_vs = (x + w_vtl) + 28
+                # VS is Right Sash. Handle on Left side of VS (Central).
+                x_h_vs = (x + w_vtl) + 17.5
                 draw_handle_icon(svg, x_h_vs, y_h_vis, z_index=z_base+8)
 
         # Labels VP / VS
@@ -1037,18 +1580,14 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
         draw_text(svg, x+w/2, y+h-30, "OB", font_size=20, fill="black", weight="bold", z_index=z_base+7)
         
         # HANDLE FOR SOUFFLET: Top Center
-        # Profile width ~70mm. Handle centered on top rail. Frame width 55mm?
-        # Top sash rail is at y. Handle axis y + 28.
+        # Top Rail center:
+        # y start of frame. y frame interior = y+24.
+        # Sash top rail = 31mm. Center = 24 + 15.5 = 39.5.
+        
         h_soufflet_x = x + w/2
-        h_soufflet_y = y + 28 # Top rail center
-        # Scale handle down slightly? Or rotate?
-        # Soufflet handles are often horizontal. Let's rotate -90 or 90.
-        # For simplicity, vertical is fine, inverted?
-        # User said "Traverse Haute". 
-        # V73 Correctif: User wants Horizontal, Tail to the Right.
-        # Default is Down. Rotate -90 makes it point Right? 
-        # SVG Rotation: + clockwise. Down (0,1) -> -90 -> Right (1,0)? No wait.
-        # (0,1) -> rot(-90) -> (1,0). Yes.
+        h_soufflet_y = y + 39.5
+        
+        # User wants Horizontal, Tail to the Right.
         draw_handle_icon(svg, h_soufflet_x, h_soufflet_y, z_index=z_base+8, rotation=-90)
          
     elif type_ouv == "Coulissant":
@@ -1140,14 +1679,13 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
              y_handle_c = max(y + 50, min(y + h - 50, y + h - hp_val))
 
         # Handle Left Sash (on its Left Stile - Jamb Side)
-        # Sash starts at x. Frame visible ~55. Center 28.
-        # User wants "extremity". Left sash -> Left side.
-        x_h_c_left = x + 28
+        # Offset from Left Edge = 39.5mm (Dormant 24 + Half Sash 15.5)
+        x_h_c_left = x + 39.5
         draw_handle_icon(svg, x_h_c_left, y_handle_c, z_index=z_base+12)
         
         # Handle Right Sash (on its Right Stile - Jamb Side)
-        # Sash ends at x+w.
-        x_h_c_right = (x + w) - 28
+        # Offset from Right Edge = 39.5mm
+        x_h_c_right = (x + w) - 39.5
         draw_handle_icon(svg, x_h_c_right, y_handle_c, z_index=z_base+12)
 
     # GRILLE D'AÉRATION - V73 FIX
@@ -1766,6 +2304,191 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     final_svg += '</svg>'
     return final_svg
 
+def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
+    """HTML generation for Habillage printing (Single Page, Compact, Logo Header)."""
+    
+    css = """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        
+        .page-container { 
+            max-width: 210mm; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+
+        /* GRID LAYOUT */
+        .grid-container { display: grid; grid-template-columns: 35% 60%; gap: 5%; margin-bottom: 20px; }
+        
+        /* HEADINGS */
+        h3 { 
+            font-size: 14px; color: #2c3e50; margin: 0 0 10px 0; 
+            border-left: 4px solid #3498db; padding-left: 8px; 
+            line-height: 1.2;
+        }
+        
+        /* PANELS */
+        .panel { background: #f9f9f9; padding: 10px; border-radius: 4px; font-size: 12px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #555; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; }
+        
+        .schema-box { 
+            border: 1px solid #eee; border-radius: 4px; padding: 5px; 
+            text-align: center; height: 160px; display: flex; align-items: center; justify-content: center;
+            margin-bottom: 15px;
+        }
+        .schema-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        
+        .visual-box {
+            border: 1px solid #eee; border-radius: 4px; height: 280px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative;
+        }
+        .visual-box svg { max-height: 250px; width: auto; max-width: 95%; }
+        
+        /* TABLE DETAILS */
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+        th { background: #2c3e50; color: white; padding: 6px; text-align: left; text-transform: uppercase; font-size: 10px; }
+        td { border-bottom: 1px solid #eee; padding: 6px; color: #444; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        
+        .footer { 
+            margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; 
+            font-size: 9px; color: #999; text-align: center; 
+        }
+
+        @media print {
+            @page { size: A4; margin: 5mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; transform: scale(0.95); transform-origin: top center; }
+            .no-print { display: none; }
+        }
+    </style>
+    """
+    
+    # Precompute
+    import datetime
+    prof_name = cfg['prof']['name']
+    
+    # Dims string logic
+    exclude_keys = ['ref', 'qte', 'length', 'finition', 'epaisseur', 'couleur', 'modele']
+    dim_str_display = ", ".join([f"{k}={v}" for k,v in cfg['inputs'].items() if k not in exclude_keys])
+    
+    # Surface
+    try:
+        surface = (dev_val * cfg['length'] * cfg['qte']) / 1000000
+    except:
+        surface = 0
+
+    # Schema Image HTML
+    schema_html = ""
+    if schema_b64:
+        schema_html = f'<img src="data:image/jpeg;base64,{schema_b64}">'
+    else:
+        schema_html = '<span style="color:#ccc;">Aucune image</span>'
+
+    # Logo HTML (Replaces Title)
+    logo_html = f"<h1>Fiche Technique</h1>"
+    if logo_b64:
+        logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>{css}</head>
+    <body>
+        <div class="page-container">
+            <!-- HEADER -->
+            <div class="header">
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">{prof_name}</div>
+                </div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE CHANTIER</div>
+                    <div class="ref">{cfg['ref']}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
+            </div>
+            
+            <!-- MAIN GRID -->
+            <div class="grid-container">
+                <!-- LEFT COLUMN -->
+                <div>
+                    <h3>Schéma de Principe</h3>
+                    <div class="schema-box">
+                        {schema_html}
+                    </div>
+                    
+                    <h3>Caractéristiques</h3>
+                    <div class="panel">
+                        <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{cfg['qte']}</span></div>
+                        <div class="panel-row"><span class="lbl">Longueur</span> <span class="val">{cfg['length']} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Développé</span> <span class="val">{int(dev_val)} mm</span></div>
+                        <div class="panel-row"><span class="lbl">Matière</span> <span class="val">{cfg['finition']}</span></div>
+                        <div class="panel-row"><span class="lbl">Couleur</span> <span class="val">{cfg['couleur']}</span></div>
+                        <div class="panel-row"><span class="lbl">Épaisseur</span> <span class="val">{cfg['epaisseur']}</span></div>
+                        
+                        <div style="margin-top:10px; padding-top:10px; border-top:1px solid #ddd;">
+                            <span class="lbl">Dimensions :</span> <br>
+                            <span style="font-family:monospace; color:#333;">{dim_str_display}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- RIGHT COLUMN -->
+                <div>
+                    <h3>Visualisation 3D</h3>
+                    <div class="visual-box">
+                        {svg_string}
+                        <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue filaire indicative</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- FOOTER TABLE -->
+            <h3>Détails de Commande</h3>
+            <table>
+                <thead>
+                    <tr><th>Libellé</th><th style="text-align:right;">Valeur</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Référence</td><td style="text-align:right;">{cfg['ref']}</td></tr>
+                    <tr><td>Modèle</td><td style="text-align:right;">{prof_name}</td></tr>
+                    <tr><td>Quantité</td><td style="text-align:right;">{cfg['qte']}</td></tr>
+                    <tr><td>Dimensions</td><td style="text-align:right;">{dim_str_display}</td></tr>
+                    <tr><td>Longueur</td><td style="text-align:right;">{cfg['length']} mm</td></tr>
+                    <tr><td>Développé</td><td style="text-align:right;">{int(dev_val)} mm</td></tr>
+                    <tr><td>Surface Totale</td><td style="text-align:right;">{surface:.2f} m²</td></tr>
+                </tbody>
+            </table>
+            
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise<br>
+                Merci de vérifier les cotes avant validation définitive.
+            </div>
+        </div>
+        <script>
+            setTimeout(() => {{ window.print(); }}, 800);
+        </script>
+    </body>
+    </html>
+    """
+    return html
+
 def get_html_download_link(content_html, filename, label):
     import base64
     b64 = base64.b64encode(content_html.encode()).decode()
@@ -1822,7 +2545,34 @@ def render_habillage_main_ui(cfg):
         
         st.download_button("🖼️ Télécharger SVG", svg, f"profil_{cfg['ref']}.svg", "image/svg+xml")
 
+    # --- PRINT BUTTON (HTML) ---
     st.markdown("---")
+    if st.button("🖨️ Imprimer", key="btn_print_hab"):
+        # Import helper (or define it in app.py)
+        # For simplicity, we inline the logic or assume the function is pasted in app.py
+        # Since I wrote it to a separate file, I should read it or paste it. 
+        # But wait, I can just define it inside app.py for simplicity as requested by user constraints (single file preference?)
+        # Let's assume I actually put `render_html_habillage` IN app.py in a previous step or will do it now.
+        # I'll put the function definition at the top of app.py or near render_html_template.
+        
+        # Prepare Schema B64 (Restored)
+        schema_b64 = ""
+        img_p = os.path.join(ARTIFACT_DIR, prof['image_key'])
+        if os.path.exists(img_p):
+             import base64
+             with open(img_p, "rb") as f:
+                 schema_b64 = base64.b64encode(f.read()).decode()
+
+        st.session_state['print_ts_hab'] = datetime.datetime.now().isoformat()
+        
+        # Pass SVG, Logo (Global), Dev, and Schema
+        html_content = render_html_habillage(cfg, svg, LOGO_B64, dev, schema_b64)
+        html_content += f"<!-- TS: {st.session_state['print_ts_hab']} -->"
+        
+        import streamlit.components.v1 as components
+        components.html(html_content, height=0, width=0)
+        st.info(f"Impression lancée... ({st.session_state['print_ts_hab'].split('T')[1][:8]})")
+
     st.subheader("Récapitulatif (Habillage)")
     
     col_table, col_export = st.columns([3, 1])
@@ -1842,6 +2592,7 @@ def render_habillage_main_ui(cfg):
         st.write("")
         st.write("")
         
+        # JSON EXPORT
         hab_data = {
             "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
             "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
@@ -1850,103 +2601,8 @@ def render_habillage_main_ui(cfg):
         json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
         st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
 
-        import base64
-        img_b64 = ""
-        if os.path.exists(image_path):
-             with open(image_path, "rb") as f:
-                 img_b64 = base64.b64encode(f.read()).decode()
-        
-        html_report = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Fiche Technique - {prof['name']}</title>
-            <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
-            <style>
-                body {{ font-family: 'Roboto', sans-serif; color: #333; line-height: 1.6; margin: 0; padding: 20px; background: #fff; }}
-                .page-container {{ max-width: 210mm; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
-                .header {{ border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 40px; display: flex; justify-content: space-between; align-items: center; }}
-                .header h1 {{ margin: 0; font-size: 24px; color: #2c3e50; text-transform: uppercase; letter-spacing: 1px; }}
-                .header .ref {{ font-size: 14px; color: #7f8c8d; }}
-                .main-grid {{ display: grid; grid-template-columns: 40% 55%; gap: 5%; margin-bottom: 40px; }}
-                h2 {{ font-size: 18px; color: #34495e; border-left: 5px solid #3498db; padding-left: 10px; margin-bottom: 20px; clear: both; }}
-                .schema-box {{ text-align: center; margin-bottom: 30px; border: 1px solid #eee; padding: 10px; border-radius: 4px; }}
-                .info-box {{ background: #f8f9fa; padding: 20px; border-radius: 6px; font-size: 15px; }}
-                .info-row {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }}
-                .info-row:last-child {{ border: 0; }}
-                .label {{ font-weight: bold; color: #555; white-space: nowrap; margin-right: 15px; min-width: 100px; }}
-                .dims-val {{ font-size: 16px; color: #2c3e50; text-align: left; }}
-                .dims-row {{ justify-content: flex-start; gap: 20px; }}
-                .visual-box {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 400px; }}
-                .visual-box svg {{ width: 100%; height: auto; max-height: 500px; display: block; margin: auto; }}
-                table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 20px; }}
-                th {{ background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 500; }}
-                td {{ border-bottom: 1px solid #ddd; padding: 10px; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .footer {{ margin-top: 60px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #eee; padding-top: 20px; }}
-                @media print {{ body {{ padding: 0; background: white; }} .page-container {{ box-shadow: none; padding: 0; max-width: none; }} @page {{ margin: 15mm; size: A4 portrait; }} }}
-            </style>
-        </head>
-        <body>
-            <div class="page-container">
-                <div class="header">
-                    <div>
-                        <h1>Fiche Technique</h1>
-                        <div style="font-size: 18px; margin-top: 5px; color: #3498db;">{prof['name']}</div>
-                    </div>
-                    <div class="ref" style="text-align: right;">
-                        <div>RÉFÉRENCE CHANTIER</div>
-                        <strong style="font-size: 18px; color: #000;">{cfg['ref']}</strong>
-                        <div>{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
-                    </div>
-                </div>
-                
-                <div class="main-grid">
-                    <div>
-                        <h2>Schéma de Principe</h2>
-                        <div class="schema-box">
-                             <img src="data:image/jpeg;base64,{img_b64}" style="max-width: 100%; max-height: 200px;">
-                        </div>
-                        <h2>Caractéristiques</h2>
-                        <div class="info-box">
-                            <div class="info-row"><span class="label">Quantité</span> <span>{qty}</span></div>
-                            <div class="info-row"><span class="label">Longueur</span> <span>{L_mm} mm</span></div>
-                            <div class="info-row"><span class="label">Développé</span> <span>{int(dev)} mm</span></div>
-                            <div class="info-row"><span class="label">Matière</span> <span>{cfg['finition']}</span></div>
-                            <div class="info-row"><span class="label">Couleur</span> <span>{cfg['couleur']}</span></div>
-                            <div class="info-row"><span class="label">Épaisseur</span> <span>{cfg['epaisseur']}</span></div>
-                            <div class="info-row dims-row" style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
-                                <span class="label">Dimensions</span> 
-                                <span class="dims-val">{dim_str_export}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div>
-                        <h2>Visualisation 3D</h2>
-                        <div class="visual-box">
-                            {svg}
-                            <div style="margin-top: 15px; font-size: 12px; color: #999;">Vue filaire indicative</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <h2>Détails de Commande</h2>
-                <table>
-                    <thead><tr><th style="width: 40%;">Libellé</th><th>Valeur</th></tr></thead>
-                    <tbody>
-                        {''.join([f'<tr><td>{r[0]}</td><td>{r[1]}</td></tr>' for r in df_hab.values])}
-                    </tbody>
-                </table>
-                <div class="footer">Document généré automatiquement via le Calculateur Menuiserie & Habillage.<br>Merci de vérifier les cotes avant validation définitive.</div>
-            </div>
-            <script>
-                // Auto-print removed, purely manual now as per request to remove 'frame'.
-            </script>
-        </body>
-        </html>
-        """
-        st.download_button("📄 Imprimer (PDF)", html_report, f"fiche_{cfg['ref']}.html", "text/html", use_container_width=True)
+        # Legacy HTML Report Removed (Cleaned up)
+        pass
 
 def render_habillage_form():
     """Renders the Sidebar inputs for Habillage and returns the config dict."""
@@ -2213,22 +2869,20 @@ def render_menuiserie_form():
         qte = c2.number_input("Qté", 1, 100, 1, key="qte_val")
 
     # --- SECTION 2 : MATERIAU ---
+    # --- SECTION 2 : MATERIAU ---
+    # --- SECTION 2 : MATERIAU ---
     with st.expander("2. Matériau & Ailettes", expanded=False):
-        mat = st.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
+        # 1. PROJET (Left) & MATERIAU (Right)
+        c_m1, c_m2 = st.columns(2)
+        type_projet = c_m1.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
+        mat = c_m2.radio("Matériau", ["PVC", "ALU"], horizontal=True, key="mat_type")
 
-        if mat == "PVC":
-            liste_ailettes_std = [0, 30, 40, 60]
-            liste_couleurs = ["Blanc (9016)", "Plaxé Chêne", "Plaxé Gris 7016", "Beige"]
-        else: 
-            liste_ailettes_std = [0, 20, 35, 60, 65]
-            liste_couleurs = ["Blanc (9016)", "Gris 7016 Texturé", "Noir 2100 Sablé", "Anodisé Argent"]
+        # Color Logic handled below in section 6
 
-        ep_dormant = st.number_input("Épaisseur Dormant (mm)", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
+        st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
 
-        st.write("---")
-        # NOUVEAU : TYPE DE POSE
-        # Remplacement Checkbox par Radio Horizontal (Style PVC/ALU)
-        type_projet = st.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
+        # 2. TYPE DE POSE & DORMANT
+        c_pose1, c_pose2 = st.columns([2, 1])
         
         if type_projet == "Rénovation":
             liste_pose = ["Pose en rénovation (R)", "Pose en rénovation Dépose Totale (RT)"]
@@ -2236,33 +2890,80 @@ def render_menuiserie_form():
             liste_pose = ["Pose en applique avec doublage (A)", "Pose en applique avec embrasures (E)", 
                           "Pose en feuillure (F)", "Pose en tunnel nu intérieur (T)", "Pose en tunnel milieu de mur (TM)"]
         
-        type_pose = st.selectbox("Type de Pose", liste_pose, key="pose_type")
-
-        st.write("---")
+        type_pose = c_pose1.selectbox("Type de Pose", liste_pose, key="pose_type")
+        ep_dormant = c_pose2.number_input("Dormant", 50, 200, 70, step=10, help="Largeur visible du profilé", key="frame_thig")
+        
+        st.markdown("<hr style='margin:5px 0'>", unsafe_allow_html=True)
+        
+        # 4. AILETTES & SEUIL (Aligned)
+        # Checkbox ABOVE to allow perfect alignment of inputs
+        bas_identique = st.checkbox("Seuil identique aux ailettes ?", False, key="same_bot")
+        
         c_ail1, c_ail2 = st.columns(2)
-        ail_val = c_ail1.selectbox(f"Ailettes H/G/D", liste_ailettes_std, index=len(liste_ailettes_std)-1, key="fin_val")
-        bas_identique = c_ail2.checkbox("Seuil idem ?", False, key="same_bot")
-        ail_bas = ail_val if bas_identique else c_ail2.selectbox(f"Seuil / Bas", liste_ailettes_std, index=0, key="fin_bot")
-
-        # CONFIG PARTIE BASSE (Seuil)
-        st.write("---")
-        st.markdown("**Partie Basse**")
-        is_appui_rap = st.checkbox("Appui rapporté ?", False, key="is_appui_rap")
-        largeur_appui = 0
+        ail_val = c_ail1.number_input(f"Ailettes (mm)", min_value=0, value=60, step=5, key="fin_val")
+        
+        val_bas_input = 0
+        if not bas_identique:
+             val_bas_input = c_ail2.number_input(f"Seuil (mm)", min_value=0, value=0, step=5, key="fin_bot")
+        else:
+             # Make it look like a disabled input or just text aligned
+             # Using disabled input is better for visual alignment
+             c_ail2.number_input(f"Seuil (mm)", value=ail_val, disabled=True, key="fin_bot_disabled")
+             
+        # 5. APPUI
+        # Condensed & Centered: 15px Top push, 0px Bottom manual margin (relies on widget padding)
+        st.markdown("<hr style='margin:10px 0 15px 0'>", unsafe_allow_html=True)
+        
+        # Left Aligned
+        is_appui_rap = st.checkbox("Appui Rapporté ?", False, key="is_appui_rap")
+        
         if is_appui_rap:
             largeur_appui = st.number_input("Largeur Appui (mm)", 0, 500, 100, step=10, key="width_appui")
-            txt_partie_basse = f"Appui Rapporté (Largeur {largeur_appui}mm)"
-        else:
-            txt_partie_basse = "Bavette 100x100 mm"
-            st.caption("Défaut : Bavette 100x100 mm")
-
-        st.write("---")
+        
+        # 6. COULEURS
+        # Pull bottom line closer
+        st.markdown("<hr style='margin:0px 0 10px 0'>", unsafe_allow_html=True)
         cc1, cc2 = st.columns(2)
-        col_int = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in")
-        col_ext = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex")
+        
+        # DEFINITION DES COULEURS (Market Standards)
+        if mat == "PVC":
+            liste_couleurs = [
+                "Blanc (Masse)",
+                "Beige (Masse)",
+                "Gris Anthracite (Plaxé 7016)",
+                "Chêne Doré (Plaxé)",
+                "Autre / RAL Spécifique"
+            ]
+        else: # ALU
+            liste_couleurs = [
+                "Blanc Satiné (9016)",
+                "Gris Anthracite Texturé (7016)",
+                "Noir Sablé (2100)",
+                "Gris Pierre de Lune (7035)",
+                "AS (Aluminium Standard / Anodisé)",
+                "Gris Argent (9006)",
+                "Brun (8019)",
+                "Autre / RAL Spécifique"
+            ]
+            
+        # INTERIEUR
+        sel_c1 = cc1.selectbox("Couleur Int", liste_couleurs, key="col_in_select")
+        if sel_c1 == "Autre / RAL Spécifique":
+            st.session_state['col_in'] = cc1.text_input("RAL Int.", placeholder="Ex: Rouge 3004", key="col_in_custom")
+        else:
+            st.session_state['col_in'] = sel_c1
+            
+        # EXTERIEUR
+        sel_c2 = cc2.selectbox("Couleur Ext", liste_couleurs, key="col_ex_select")
+        if sel_c2 == "Autre / RAL Spécifique":
+            st.session_state['col_ex'] = cc2.text_input("RAL Ext.", placeholder="Ex: Bleu 5003", key="col_ex_custom")
+        else:
+            st.session_state['col_ex'] = sel_c2
 
     # --- SECTION 3 : DIMENSIONS ---
     with st.expander("3. Dimensions & VR", expanded=False):
+        # New Dimensions Type Dropdown
+        dim_type = st.selectbox("Type de Côtes", ["Côtes fabrication", "Côtes passage", "Côtes tableau"], key="dim_type")
         c3, c4 = st.columns(2)
         
         # Libellé dynamique pour la Hauteur
@@ -2299,6 +3000,10 @@ def render_menuiserie_form():
              
         # Calcul des zones à plat pour le dessin
         zones_config = flatten_tree(st.session_state['zone_tree'], 0, 0, l_dos_dormant, h_menuiserie)
+        
+        # Compatibility with legacy code
+        col_int = st.session_state.get('col_in', 'Blanc')
+        # col_ext = st.session_state.get('col_ex', 'Blanc')
         
         color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
         hex_col = "#FFFFFF"
@@ -2365,6 +3070,45 @@ def render_menuiserie_form():
 
 # --- 3. GÉNÉRATEUR SVG FINAL ---
 def generate_svg_v73():
+    # RETRIEVE VARIABLES FROM SESSION STATE (Fix NameError)
+    # Must match keys used in Sidebar
+    
+    # 1. Basic Dimensions
+    l_dos_dormant = st.session_state.get('width_dorm', 1200)
+    h_dos_dormant = st.session_state.get('height_dorm', 1400)
+    
+    # 2. Options
+    vr_opt = st.session_state.get('vr_enable', False)
+    h_vr = st.session_state.get('vr_h', 185) if vr_opt else 0
+    vr_grille = st.session_state.get('vr_g', False)
+    
+    h_menuiserie = h_dos_dormant - h_vr
+    
+    # 3. Ailettes & Dormant
+    ep_dormant = st.session_state.get('frame_thig', 70)
+    ail_val = st.session_state.get('fin_val', 60)
+    
+    same_bot = st.session_state.get('same_bot', False)
+    # Logic from Sidebar: if same, use ail_val, else use fin_bot input
+    if same_bot: ail_bas = ail_val
+    else: ail_bas = st.session_state.get('fin_bot', 0)
+    
+    # 4. Colors
+    col_int = st.session_state.get('col_in', 'Blanc')
+    # Config Global
+    color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
+    hex_col = "#FFFFFF"
+    for k, v in color_map.items():
+        if k in col_int: hex_col = v
+        
+    cfg_global = {
+        'color_frame': hex_col,
+        'color_glass': "#d6eaff"
+    }
+
+    # 5. Zones
+    zones_config = flatten_tree(st.session_state.get('zone_tree', init_node('root')), 0, 0, l_dos_dormant, h_menuiserie)
+    
     svg = []
     col_fin = "#D3D3D3"
     
@@ -2593,10 +3337,18 @@ def generate_svg_v73():
 # Remove columns to avoid gutters
 if 'LOGO_B64' in globals():
     try:
-         # Reduced width for better balance (user req: "plus petit")
-         st.image(base64.b64decode(LOGO_B64), width=350)
+         # Robust Logic for Main UI Logo
+         try:
+             decoded = base64.b64decode(LOGO_B64, validate=True)
+         except:
+             b64 = LOGO_B64
+             b64 += "=" * ((4 - len(b64) % 4) % 4)
+             decoded = base64.b64decode(b64)
+         
+         st.image(decoded, width=300)
     except Exception as e:
-         st.error(f"Error loading logo: {e}")
+         # Silent fail - User requested "no error messages"
+         pass
 else:
      st.warning("Logo variable not found.")
 
@@ -2643,96 +3395,133 @@ with c_preview:
             st.code(traceback.format_exc())
 
         # 2. RÉCAPITULATIF SOUS LE DESSIN
+        st.markdown("### 📋 Fiche Technique")
         st.markdown("---")
-        
-        # PREPARE ZONES DATA
+
+        # PREPARE ZONES DATA (moved up for use in recap)
         config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
         sorted_zones = sorted(config_display, key=lambda z: z['id'])
+        s = st.session_state # Ensure s is defined
 
-        # Nested columns for Recap
-        c_recap_l, c_recap_r = st.columns([1, 1])
+        # Define w_d and h_d for calculations
+        w_d = s.get('width_dorm', 0)
+        h_d = s.get('height_dorm', 0)
 
-        with c_recap_l:
-            st.subheader("Info. Générales")
+        # --- SECTION 1: INFORMATIONS GLOBALES (Strict Schema) ---
+        c1, c2 = st.columns(2)
+        
+        # Calculate Dimensions
+        w_rec = w_d + (2 * s.get('fin_val', 0))
+        # Recouvrement Height: Fab + Ailette Top + Bottom Piece (Appui or Aillette)
+        h_bot_add = s.get('width_appui', 0) if s.get('is_appui_rap', False) else (s.get('fin_bot', 0) if not s.get('same_bot', False) else s.get('fin_val', 0))
+        h_rec = h_d + s.get('fin_val', 0) + h_bot_add
+
+        with c1:
+            st.markdown(f"**Repère** : {s.get('ref_id', 'F1')}")
+            st.markdown(f"**Quantité** : {s.get('qte_val', 1)}")
+            st.markdown(f"**Type de projet** : {s.get('proj_type', 'Rénovation')}")
+            st.markdown(f"**Matériaux** : {s.get('mat_type', 'PVC')}")
+            st.markdown(f"**Type de pose** : {s.get('pose_type', '-')}")
+            st.markdown(f"**Dormant** : {s.get('frame_thig', 70)} mm")
             
-            s = st.session_state
-            
-            if s.get('is_appui_rap', False):
-                pb_txt = f"Appui Rapp. ({s.get('width_appui', 0)}mm)"
+            # Ailettes
+            if s.get('fin_val', 0) > 0:
+                 st.markdown(f"**Ailettes** : {s.get('fin_val',0)}mm (H/G/D) / {s.get('fin_bot', 0) if not s.get('same_bot') else s.get('fin_val',0)}mm (Bas)")
             else:
-                pb_txt = "Bavette 100x100"
-                
-            vr_txt = "Oui" if s.get('vr_enable', False) else "Non"
-            h_ail = s.get('fin_val', 0)
-            b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
-            ailes_txt = f"H/G/D:{h_ail} B:{b_ail}"
-
-            try:
-                nb_zones = len(flatten_tree(s.get('zone_tree'), 0,0,0,0))
-            except: nb_zones = 1
-
-            df_infos = pd.DataFrame({
-                "Paramètre": ["Repère", "Qté", "Dim. Dos", "Matériau", "Pose", "Bas", "Couleur", "VR", "Ailettes"],
-                "Valeur": [
-                    s.get('ref_id', 'F1'),
-                    s.get('qte_val', 1),
-                    f"{s.get('width_dorm', 0)}x{s.get('height_dorm', 0)}",
-                    s.get('mat_type', 'PVC'),
-                    s.get('pose_type', '-')[:15]+"...",
-                    pb_txt,
-                    f"In:{s.get('col_in','-')[:5]}.. / Ex:{s.get('col_ex','-')[:5]}..",
-                    vr_txt,
-                    ailes_txt
-                ]
-            })
-            st.table(df_infos)
+                 st.markdown(f"**Ailettes** : Sans")
             
-            # PDF EXPORT GENERATION
-            import base64
-            import datetime
-            zones_html_rows = ""
-            for z in sorted_zones:
-                d_list = []
-                remp = z['params'].get('remplissage_global', 'Vitrage')
-                d_list.append(f"Remplissage: {remp}")
-                if remp == "Vitrage":
-                    d_list.append(f"Vitrage: Ext {z['params'].get('vitrage_ext','4')} / Int {z['params'].get('vitrage_int','4')}")
-                if z['params'].get('grille_aera'): d_list.append(f"Grille: {z['params'].get('pos_grille')}")
-                if 'sens' in z['params']: d_list.append(f"Sens: {z['params']['sens']}")
-                details_str = ", ".join(d_list)
-                zones_html_rows += f"<tr><td><strong>{z['label']}</strong> ({z['type']})</td><td>{details_str}</td></tr>"
+        with c2:
+             # Appui Rapporté ?
+             if s.get('is_appui_rap', False):
+                 st.markdown(f"**Appui rapporté** : OUI ({s.get('width_appui')}mm)")
+             else:
+                 st.markdown(f"**Appui rapporté** : NON")
 
-            menuiserie_html = f"""
-            <!DOCTYPE html><html><head><meta charset="utf-8">
-            <style>
-                body {{ font-family: sans-serif; padding: 20px; }}
-                h1 {{ color:#2c3e50; }} table {{ width: 100%; border-collapse: collapse; margin-top:20px; }}
-                td, th {{ border: 1px solid #ddd; padding: 8px; }} th {{ background: #eee; }}
-            </style></head><body>
-            <h1>Fiche Technique - {s.get('ref_id', 'F1')}</h1>
-            <p><strong>Projet:</strong> {s.get('project', {}).get('name', 'P')}</p>
-            <div style="text-align:center; margin:20px;">{svg_output}</div>
-            <h2>Détails</h2>
-            <table>{zones_html_rows}</table>
-            </body></html>"""
+             st.markdown(f"**Couleur** : {s.get('col_in','-')} (Int) / {s.get('col_ex','-')} (Ext)")
+             st.markdown(f"**Type de côtes** : {s.get('dim_type', 'Tableau')}")
+             st.markdown(f"**Dim. Dos de Dormant** : {w_d} x {h_d} mm")
+             st.markdown(f"**Dim. Recouvrement Int.** : {w_rec} x {h_rec} mm")
+             st.markdown(f"**Hauteur d'allège** : {s.get('h_allege', 0)} mm")
+             
+             # Volet Roulant
+             if s.get('vr_enable'):
+                  st.markdown(f"**Volet Roulant** : OUI ({int(s.get('vr_h',0))}mm)")
+             else:
+                  st.markdown(f"**Volet Roulant** : NON")
+
+        st.markdown("---")
+        
+        # --- SECTION 2: DETAILS PAR ZONE (Strict Schema) ---
+        st.markdown("#### Détails par Zone")
+        
+        for i, z in enumerate(sorted_zones):
+             # Schema: Match User Request
+             # 1. Dim Zone
+             # 2. Type Config
+             # 3. Traverse ? (Epaisseur, Remplissage H/B)
+             # 4. Type Vitrage
+             # 5. Ventilation
+             
+             parts = []
+             # 1. Dimensions
+             parts.append(f"**{z['label']}** : {int(z['w'])} x {int(z['h'])} mm")
+             
+             # 2. Type Config
+             parts.append(f"Config : {z['type']}")
+             
+             # 3. Traverses Logic
+             nb_h = z['params'].get('traverses', 0)
+             # Note: User prompt implies "Traverse" singular/list. 
+             # If traverse exists, show details.
+             if nb_h > 0:
+                 ep_t = z['params'].get('epaisseur_traverse', 20)
+                 parts.append(f"Traverse : {nb_h} Horiz.")
+                 parts.append(f"Ep. {ep_t}mm")
+                 # Remplissage Haut/Bas check (Only implies if Soubassement/1H)
+                 if nb_h == 1 and z['params'].get('traverses_v', 0) == 0:
+                      parts.append(f"Remp. Haut: {z['params'].get('remp_haut','Vitrage')}")
+                      parts.append(f"Remp. Bas: {z['params'].get('remp_bas','Panneau')}")
+             else:
+                 # Check Petits Bois / Muntins Grid if not strictly a 'Traverse' divider
+                 nb_v = z['params'].get('traverses_v', 0)
+                 if nb_v > 0:
+                      parts.append(f"Petits Bois : {nb_v} Vert.")
+             
+             # 4. Vitrage / Remplissage Global
+             # If Remplissage Global is used (no split traverse logic overriding it)
+             remp_g = z['params'].get('remplissage_global', 'Vitrage')
+             if remp_g == "Vitrage":
+                  # Clean Vitrage String
+                  v_str = str(z['params'].get('vitrage_resume', '-')).replace('\n', ' ')
+                  parts.append(f"Vitrage : {v_str}")
+             else:
+                  parts.append(f"Remplissage : Panneau Plein")
+                  
+             # 5. Ventilation
+             g_pos = z['params'].get('pos_grille', 'Aucune')
+             if g_pos != "Aucune":
+                  parts.append(f"Ventilation : {g_pos}")
+             else:
+                  parts.append(f"Ventilation : Non")
+
+             # Render
+             st.markdown(" • ".join(parts))
+        
+        st.markdown("---")
+        
+        # Button for Printing
+        if st.button("🖨️ Imprimer", key="btn_print_html_main"):
+            # Pass a unique timestamp to force HTML regeneration
+            s['print_ts'] = datetime.datetime.now().isoformat()
+            html_content = render_html_menuiserie(s, svg_output, LOGO_B64)
             
-            st.download_button(
-                label="📄 PDF (Fiche)",
-                data=menuiserie_html,
-                file_name=f"Fiche_{s.get('ref_id', 'F1')}.html",
-                mime="text/html"
-            )
-
-        with c_recap_r:
-            st.subheader("Détail Zones")
-            for z in sorted_zones:
-                with st.expander(f"{z['label']} : {z['type']}", expanded=True):
-                    remp_global = z['params'].get('remplissage_global', 'Vitrage')
-                    st.write(f"**Remp:** {remp_global}")
-                    if remp_global == "Vitrage":
-                        st.caption(f"Ex:{z['params'].get('vitrage_ext')} / In:{z['params'].get('vitrage_int')}")
-                    if z['params'].get('grille_aera'):
-                        st.caption(f"Grille: {z['params'].get('pos_grille')}")
+            # Append invisible timestamp to force Streamlit component update and re-trigger JS
+            html_content += f"<!-- TS: {s['print_ts']} -->"
+            
+            import streamlit.components.v1 as components
+            # Height 0 to be invisible, but content triggers JS
+            components.html(html_content, height=0, width=0)
+            st.info(f"Impression lancée... ({s['print_ts'].split('T')[1][:8]})")
 
     else:
         # HABILLAGE PREVIEW
