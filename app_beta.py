@@ -152,6 +152,18 @@ def generate_pdf_report(data_dict, svg_string=None):
 def render_html_menuiserie(s, svg_string, logo_b64):
     """HTML generation for Menuiserie printing (Full Width Bottom Plan)."""
     
+    # Pre-calc Observations
+    obs_men_html = ""
+    if s.get('men_obs'):
+        obs_men_html = f"""
+            <div class="section-block">
+                <h3>Observations</h3>
+                <div class="panel">
+                    <div class="panel-row" style="display:block; min-height:auto; padding:10px;"><span class="val" style="text-align:left; width:100%; white-space: pre-wrap;">{s.get('men_obs')}</span></div>
+                </div>
+            </div>
+        """
+
     css = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
@@ -369,9 +381,14 @@ def render_html_menuiserie(s, svg_string, logo_b64):
                 </div>
             </div>
             
+            <!-- OBSERVATIONS -->
+            <!-- OBSERVATIONS -->
+            {obs_men_html}
+            
             <div class="footer">
                 Document généré automatiquement - Miroiterie Yerroise<br>
-                Merci de vérifier les cotes avant validation définitive.
+                Merci de vérifier les cotes avant validation définitive.<br>
+                <span style="color:red; font-size:8px;">DEBUG: men_obs='{s.get('men_obs', 'None')}' keys={list(s.keys())}</span>
             </div>
         </div>
     </body>
@@ -2314,6 +2331,17 @@ def generate_profile_svg(type_p, inputs, length, color_name):
     return final_svg
 
 def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
+    # Pre-calc Observations
+    obs_hab_html = ""
+    if st.session_state.get('hab_obs'):
+        obs_hab_html = f"""
+            <div class="section-block">
+                <h3>Observations</h3>
+                <div class="panel">
+                    <div class="panel-row" style="display:block; min-height:auto; padding:10px;"><span class="val" style="text-align:left; width:100%; white-space: pre-wrap;">{st.session_state.get('hab_obs')}</span></div>
+                </div>
+            </div>
+        """
     """HTML generation for Habillage printing (Single Page, Compact, Logo Header)."""
     
     css = """
@@ -2468,6 +2496,10 @@ def render_html_habillage(cfg, svg_string, logo_b64, dev_val, schema_b64):
                 </div>
             </div>
             
+            <!-- OBSERVATIONS -->
+            <!-- OBSERVATIONS -->
+            {obs_hab_html}
+            
             <!-- FOOTER TABLE -->
             <h3>Détails de Commande</h3>
             <table>
@@ -2596,6 +2628,9 @@ def render_habillage_main_ui(cfg):
 
     with col_table:
         st.table(df_hab)
+        if st.session_state.get('hab_obs'):
+            st.markdown("---")
+            st.markdown(f"**Observations** : {st.session_state.get('hab_obs')}")
         
     with col_export:
         st.write("")
@@ -2618,7 +2653,7 @@ def render_habillage_form():
     config = {}
     
     # 0. Identification
-    with st.expander("1. Repère et quantité", expanded=False):
+    with st.expander("📝 1. Repère et quantité", expanded=False):
         c_ref, c_qte = st.columns([3, 1])
         # CHANGEMENT: Default Ref Repère 1
         
@@ -2645,7 +2680,7 @@ def render_habillage_form():
     profile_keys = list(PROFILES_DB.keys())
     model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
     
-    with st.expander("2. Modèle & Dimensions", expanded=False):
+    with st.expander("📐 2. Modèle & Dimensions", expanded=False):
         # CHANGEMENT: Index 0 (Modèle 1 Plat / Chant)
         # Added explicit key to ensure reset clears it
         selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=0, key="hab_model_selector")
@@ -2723,7 +2758,7 @@ def render_habillage_form():
         config["length"] = length # Ensure key matches usage
 
     # 3. Finition
-    with st.expander("3. Finition", expanded=False):
+    with st.expander("🎨 3. Finition", expanded=False):
         # Type Finition choices
         type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
         type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
@@ -2786,9 +2821,12 @@ def render_habillage_form():
 
     # Finition END
     
-    # --- MOVED ACTION BUTTONS HERE (Bottom of Form, Outside Expander) ---
-    # FIXED: REMOVED ROGUE MARKDOWN
-    # st.markdown("##    # --- ACTIONS ---")
+    # 4. Observations
+    with st.expander("📝 4. Observations", expanded=False):
+        c_obs = st.container()
+        st.session_state['hab_obs'] = c_obs.text_area("Notes", value=st.session_state.get('hab_obs', ''), key="hab_obs_in")
+    
+    # --- ACTIONS ---
     st.markdown("### 💾 Actions")
     
     # 0. Show Edition Status
@@ -2867,7 +2905,7 @@ def render_menuiserie_form():
     global is_appui_rap, largeur_appui, txt_partie_basse, zones_config, cfg_global
 
     # --- SECTION 1 : IDENTIFICATION ---
-    with st.expander("1. Repère et quantité", expanded=False):
+    with st.expander("📝 1. Repère et quantité", expanded=False):
         c1, c2 = st.columns([3, 1])
         
         # HANDLE PENDING REF UPDATE (Fix StreamlitAPIException)
@@ -2880,7 +2918,7 @@ def render_menuiserie_form():
     # --- SECTION 2 : MATERIAU ---
     # --- SECTION 2 : MATERIAU ---
     # --- SECTION 2 : MATERIAU ---
-    with st.expander("2. Matériau & Ailettes", expanded=False):
+    with st.expander("🧱 2. Matériau & Ailettes", expanded=False):
         # 1. PROJET (Left) & MATERIAU (Right)
         c_m1, c_m2 = st.columns(2)
         type_projet = c_m1.radio("Type de Projet", ["Rénovation", "Neuf"], index=0, horizontal=True, key="proj_type")
@@ -2970,7 +3008,7 @@ def render_menuiserie_form():
             st.session_state['col_ex'] = sel_c2
 
     # --- SECTION 3 : DIMENSIONS ---
-    with st.expander("3. Dimensions & VR", expanded=False):
+    with st.expander("📐 3. Dimensions & VR", expanded=False):
         # New Dimensions Type Dropdown
         dim_type = st.selectbox("Type de Côtes", ["Côtes fabrication", "Côtes passage", "Côtes tableau"], key="dim_type")
         c3, c4 = st.columns(2)
@@ -2996,7 +3034,7 @@ def render_menuiserie_form():
             h_menuiserie = h_dos_dormant
 
     # --- SECTION 4 : STRUCTURE & FINITIONS ---
-    with st.expander("4. Structure & Finitions", expanded=False):
+    with st.expander("⚙️ 4. Structure & Finitions", expanded=False):
         # mode_structure = st.radio("Mode Structure", ["Simple (1 Zone)", "Divisée (2 Zones)"], horizontal=True, key="struct_mode", index=0)
         st.caption("Arbre de configuration (Diviser/Fusionner)")
 
@@ -3024,6 +3062,10 @@ def render_menuiserie_form():
             'color_frame': hex_col,
             'color_glass': "#d6eaff"
         }
+    # 7. Observations
+    with st.expander("📝 Observations", expanded=False):
+         st.session_state['men_obs'] = st.text_area("Notes", value=st.session_state.get('men_obs', ''), key="men_obs_in")
+
      # --- ACTIONS ---
     st.markdown("### 💾 Actions")
     
@@ -3330,13 +3372,11 @@ def render_volet_form():
     """Formulaire de configuration Volet Roulant"""
     s = st.session_state
     
-    st.markdown("##### ⚙️ Configuration")
-
     # 1. Header: Repère et Quantité (Matching Menuiserie Style)
     # Silent Defaults
     s['vr_mat'] = "Aluminium" 
 
-    with st.expander("📝 Repère et quantité", expanded=True):
+    with st.expander("📝 Repère et quantité", expanded=False):
         c_ref, c_qte = st.columns([3, 1])
         with c_ref:
             # Repère editable
@@ -3427,7 +3467,11 @@ def render_volet_form():
                     s['vr_cable_len'] = c_len
 
 
-    # 5. Gestion / Sauvegarde (Actions Style Menuiserie)
+    # 5. Observations
+    with st.expander("📝 Observations", expanded=False):
+         st.session_state['vr_obs'] = st.text_area("Notes", value=st.session_state.get('vr_obs', ''), key="vr_obs_in")
+
+    # 6. Gestion / Sauvegarde
     st.markdown("### 💾 Actions")
     
     active_id = s.get('active_config_id')
@@ -3739,6 +3783,18 @@ def generate_svg_volet():
 def render_html_volet(s, svg_string, logo_b64):
     """Génération HTML pour Volet Roulant"""
     
+    # Pre-calc Observations
+    obs_vr_html = ""
+    if s.get('vr_obs'):
+        obs_vr_html = f"""
+            <div class="section-block">
+                <h3>Observations</h3>
+                <div class="panel">
+                    <div class="panel-row" style="display:block; min-height:auto; padding:10px;"><span class="val" style="text-align:left; width:100%; white-space: pre-wrap;">{s.get('vr_obs')}</span></div>
+                </div>
+            </div>
+        """
+
     css = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
@@ -3756,7 +3812,7 @@ def render_html_volet(s, svg_string, logo_b64):
         h3 { font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; border-left: 5px solid #3498db; padding-left: 10px; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px; }
         
         .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
-        .panel-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dotted #ccc; min-height: 22px; }
+        .panel-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dotted #ccc; height: 26px; }
         .panel-row:last-child { border-bottom: none; }
         .panel-row .lbl { font-weight: bold; color: #444; width: 40%; display: flex; align-items: center; }
         .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; display: flex; align-items: center; justify-content: flex-end; }
@@ -3776,6 +3832,18 @@ def render_html_volet(s, svg_string, logo_b64):
     </style>
     """
     
+    # Pre-calc Observations
+    obs_vr_html = ""
+    if s.get('vr_obs'):
+        obs_vr_html = f"""
+            <div class="section-block">
+                <h3>Observations</h3>
+                <div class="panel">
+                    <div class="panel-row" style="display:block; min-height:auto; padding:10px;"><span class="val" style="text-align:left; width:100%; white-space: pre-wrap;">{s.get('vr_obs')}</span></div>
+                </div>
+            </div>
+        """
+
     # Logo
     logo_html = "<h1>Fiche Technique</h1>"
     if logo_b64:
@@ -3852,6 +3920,10 @@ def render_html_volet(s, svg_string, logo_b64):
                     <div style="position:absolute; bottom:10px; font-size:10px; color:#aaa;">Vue Extérieure - {s.get('vr_dim_type')}</div>
                 </div>
             </div>
+
+            <!-- OBSERVATIONS -->
+            <!-- OBSERVATIONS -->
+            {obs_vr_html}
             
             <div class="footer">
                 Document généré automatiquement - Miroiterie Yerroise
@@ -4163,6 +4235,11 @@ with c_preview:
              st.markdown(f"**Allège** : {s.get('h_allege', 0)} mm")
              st.markdown(f"**Volet R.** : {'OUI' if s.get('vr_enable') else 'NON'}")
 
+        # Add Observations
+        if s.get('men_obs'):
+            st.markdown("---")
+            st.markdown(f"**Observations** : {s.get('men_obs')}")
+
         st.markdown("---")
         
         # --- SECTION 2: DETAILS PAR ZONE ---
@@ -4219,9 +4296,11 @@ with c_preview:
             st.markdown(f"**Dimensions** : {s.get('vr_width')} x {s.get('vr_height')} mm")
             st.markdown(f"**Type** : {s.get('vr_type')}")
             st.markdown(f"**Coffre** : {s.get('vr_col_coffre')}")
+            st.markdown(f"**Coulisses** : {s.get('vr_col_coulisses')}")
 
         with c2:
             st.markdown(f"**Tablier** : {s.get('vr_col_tablier')}")
+            st.markdown(f"**Lame Finale** : {s.get('vr_col_lame_fin')}")
             if s.get('vr_type') == 'Motorisé':
                 st.markdown(f"**Moteur** : {s.get('vr_motor')} ({s.get('vr_power')})")
                 st.markdown(f"**Commande** : {s.get('vr_proto')}")
@@ -4232,6 +4311,11 @@ with c_preview:
             # Add Solar info if applicable
             if s.get('vr_proto') == "IO SOLAIRE":
                  st.markdown("**Option** : SOLAIRE")
+
+        # Add Observations
+        if s.get('vr_obs'):
+            st.markdown("---")
+            st.markdown(f"**Observations** : {s.get('vr_obs')}")
 
         st.markdown("---")
         if st.button("🖨️ Impression Volet", use_container_width=True):
