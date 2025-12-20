@@ -3861,6 +3861,136 @@ def render_html_volet(s, svg_string, logo_b64):
 
 
 
+
+# --- MODULE ANNEXES (NOUVEAU) ---
+ANNEXES_DB = {
+    "Général": [
+        "2 Multiproduits FPEE - 2024.pdf",
+        "FPEE - ALU _ PVC Portes Tertiaires_.pdf",
+        "FPEE - Portails.pdf",
+        "Glossaire FPEE.pdf",
+        "Doc Tech Depose Totale (FPEE).pdf"
+    ],
+    "PVC": {
+        "Catalogues": [
+            "FPEE - PVC 70 - 76 Fenêtres et Portes Fenêtres.pdf",
+            "FPEE - PVC NOVELIA RFP Fenêtres et Portes Fenêtres.pdf",
+            "FPEE - PVC RFP Fenêtres et Portes Fenêtres.pdf"
+        ],
+        "Fiche technique": [
+            "Doc tech PVC-A05 (FPEE)- 2023.pdf",
+            "Doc tech BB-A03 (70mm).pdf"
+        ],
+        "Mise en oeuvre": [
+            "Mise en oeuvre des menuiseries PVC.pdf"
+        ]
+    },
+    "ALU": {
+        "Catalogues": [
+            "FPEE - ALUMINIUM Portes et Fenêtres.pdf",
+            "FPEE - Portes.pdf"
+        ],
+        "Fiche techniques": [
+            "Doc Tech Sensation 2023-A01 (FPEE).pdf"
+        ],
+        "Mise en oeuvre": [
+            "Mise en oeuvre des menuiseries en Aluminium.pdf"
+        ]
+    }
+}
+
+def render_annexes():
+    """Affiche la section Annexes en bas de page (Menuiserie uniquement)."""
+    # Only for Menuiserie
+    if st.session_state.get('mode_module', 'Menuiserie') != 'Menuiserie':
+        return
+
+    st.markdown("---")
+    with st.expander("📂 Annexes (Documentation)", expanded=False):
+        # Determine Material (Default PVC)
+        mat = st.session_state.get('mat_type', 'PVC') 
+        
+
+
+
+        
+        def render_doc_item(file_name, key_suffix, label=None):
+            """Helper to render a row for a document"""
+            p = os.path.join(current_dir, "assets", file_name)
+            if not os.path.exists(p):
+                 st.error(f"Manquant: {file_name}")
+                 return
+
+            # Layout: Button Download | Button View | Filename
+            c_view, c_dl = st.columns([1, 1])
+            
+            clean_name = label if label else file_name.replace('.pdf','').replace('FPEE - ', '')
+            
+            # View Button Toggle Logic
+            view_key = f"view_{key_suffix}_{file_name}"
+            
+            # We use a button to toggle session state for viewing
+            # Note: We can't easily rely on st.button state across reruns for a "toggle" 
+            # without session state management, but here standard button + session state is robust.
+            if view_key not in st.session_state: st.session_state[view_key] = False
+            
+            # Row Container
+            with st.container():
+                # We want a row look. Columns for buttons.
+                # Adjusted for tighter spacing: 5% for buttons, rest for text
+                r1, r2, r3 = st.columns([0.06, 0.06, 0.88])
+                
+                with r1:
+                    with open(p, "rb") as pdf_file:
+                        st.download_button("📥", pdf_file, file_name=file_name, key=f"dl_{key_suffix}_{file_name}", help="Télécharger le PDF")
+                
+                with r2:
+                    # Toggle View
+                    label_icon = "👁️" if not st.session_state[view_key] else "🔒"
+                    if st.button(label_icon, key=f"btn_view_{key_suffix}_{file_name}", help="Visualiser / Fermer"):
+                        st.session_state[view_key] = not st.session_state[view_key]
+                        st.rerun()
+                
+                with r3:
+                     # Add small vertical padding to align with buttons
+                     st.markdown(f"<div style='margin-top: 5px;'><b>{clean_name}</b></div>", unsafe_allow_html=True)
+            
+            # Viewer Container (If visible)
+            if st.session_state[view_key]:
+                with st.spinner(f"Chargement de {clean_name}..."):
+                     try:
+                         with open(p, "rb") as f:
+                             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+                         # Height increased to 1200px for full page view
+                         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
+                         st.markdown(pdf_display, unsafe_allow_html=True)
+                     except Exception as e:
+                         st.error(f"Erreur d'affichage: {e}")
+
+        # 1. Général
+        with st.expander("1. Général", expanded=False):
+            for f in ANNEXES_DB["Général"]:
+                render_doc_item(f, "gen")
+        
+        # Get Material Data
+        mat_data = ANNEXES_DB.get(mat, {})
+        
+        # 2. Catalogue Commercial
+        with st.expander("2. Catalogue commercial", expanded=False):
+             for f in mat_data.get("Catalogues", []):
+                 render_doc_item(f, "cat")
+
+        # 3. Fiche technique
+        with st.expander("3. Fiche technique", expanded=False):
+             ft_files = mat_data.get("Fiche technique", []) or mat_data.get("Fiche techniques", [])
+             for f in ft_files:
+                 render_doc_item(f, "ft")
+
+        # 4. Mise en oeuvre
+        with st.expander("4. Mise en oeuvre", expanded=False):
+             for f in mat_data.get("Mise en oeuvre", []):
+                 render_doc_item(f, "meo")
+
 # --- MAIN LAYOUT V3 (Responsive Columns) ---
 
 # 1. Logo & Branding
@@ -4030,6 +4160,9 @@ with c_preview:
             render_habillage_main_ui(hab_config)
         else:
             st.info("Configuration Habillage non initialisée.")
+            
+# --- ANNEXES SECTION ---
+render_annexes()
 
 
 
