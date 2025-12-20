@@ -4064,8 +4064,24 @@ def render_annexes():
                          
                          # V73: Revert to simple iframe as it worked locally.
                          # Height set to 1200px.
-                         # Add Direct Link for browsers blocking iframes
-                         st.markdown(f'<a href="data:application/pdf;base64,{base64_pdf}" target="_blank">🔗 Ouvrir le PDF dans un nouvel onglet</a>', unsafe_allow_html=True)
+                         # Add Direct Link for browsers blocking iframes or Mobile
+                         st.markdown(f'''
+                             <a href="data:application/pdf;base64,{base64_pdf}" target="_blank" style="
+                                 display: inline-block;
+                                 width: 100%;
+                                 padding: 12px 20px;
+                                 background-color: #ff4b4b;
+                                 color: white;
+                                 text-decoration: none;
+                                 text-align: center;
+                                 border-radius: 8px;
+                                 font-weight: bold;
+                                 margin-bottom: 15px;
+                                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                             ">
+                                 📱 OUVRIR LE PDF EN PLEIN ÉCRAN
+                             </a>
+                         ''', unsafe_allow_html=True)
                          
                          pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
                          st.markdown(pdf_display, unsafe_allow_html=True)
