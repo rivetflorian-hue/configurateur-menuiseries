@@ -173,50 +173,53 @@ def render_html_menuiserie(s, svg_string, logo_b64):
         .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
         .header-right .date { font-size: 11px; color: #666; }
 
-        /* GRID LAYOUT (TOP SECTION) */
-        .top-section { display: grid; grid-template-columns: 48% 48%; gap: 4%; margin-bottom: 20px; }
+        /* STACKED LAYOUT (Sections) */
+        .section-block { margin-bottom: 25px; break-inside: avoid; }
         
         /* HEADINGS */
         h3 { 
-            font-size: 14px; color: #2c3e50; margin: 0 0 10px 0; 
-            border-left: 4px solid #3498db; padding-left: 8px; 
-            line-height: 1.2;
+            font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; 
+            border-left: 5px solid #3498db; padding-left: 10px; 
+            line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px;
         }
         
         /* PANELS */
-        .panel { background: #f9f9f9; padding: 10px; border-radius: 4px; font-size: 11px; margin-bottom: 5px; }
-        .panel-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee; }
+        .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dotted #ccc; }
         .panel-row:last-child { border-bottom: none; }
-        .panel-row .lbl { font-weight: bold; color: #555; }
-        .panel-row .val { font-weight: normal; color: #000; text-align: right; }
+        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; }
         
-        /* ZONES TABLE */
-        table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 5px; }
-        th { background: #cfd8dc; color: #2c3e50; padding: 4px; text-align: left; text-transform: uppercase; font-size: 9px; }
-        td { border-bottom: 1px solid #eee; padding: 4px; color: #444; }
-        tr:nth-child(even) { background-color: #fff; }
+        /* ZONES TABLE (Full Width) */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 5px; }
+        th { background: #cfd8dc; color: #2c3e50; padding: 6px; text-align: left; text-transform: uppercase; font-size: 10px; }
+        td { border-bottom: 1px solid #eee; padding: 8px 12px; color: #333; line-height: 1.4; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
 
         /* BOTTOM SECTION (PLAN) */
         .visual-box {
-            border: 1px solid #eee; border-radius: 4px; height: 480px;
+            border: none; margin-top: 20px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             position: relative;
-            width: 100%;
+            width: 100%; height: 800px; /* Reduced to fit on Page 2 with Title */
+            page-break-inside: avoid;
         }
         /* Allow SVG to take more space */
-        .visual-box svg { max-height: 460px; width: auto; max-width: 95%; }
+        .visual-box svg { height: 100%; width: auto; max-width: 98%; }
         
         .footer { 
-            margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; 
+            position: fixed; bottom: 10mm; left: 0; right: 0;
             font-size: 9px; color: #999; text-align: center; 
         }
 
         @media print {
-            @page { size: A4; margin: 5mm; }
+            @page { size: A4; margin: 12mm; }
             body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
-            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; transform: scale(0.98); transform-origin: top center; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
             .no-print { display: none; }
             h3 { break-after: avoid; }
+            /* Explicit Page Breaks with Safety Margin */
+            .page-break { page-break-before: always; padding-top: 30px; }
         }
     </style>
     """
@@ -227,19 +230,82 @@ def render_html_menuiserie(s, svg_string, logo_b64):
         logo_html = f'<img src="data:image/jpeg;base64,{logo_b64}" alt="Logo">'
         
     # Zones Processing
-    flat = flatten_tree(s.get('zone_tree'), 0,0,0,0)
+    w_d = s.get('width_dorm', 1000)
+    h_d = s.get('height_dorm', 1000)
+    flat = flatten_tree(s.get('zone_tree'), 0,0,w_d,h_d)
     real = [z for z in flat if z['type'] != 'split']
     sorted_zones = sorted(real, key=lambda z: (z['y'], z['x']))
     
+    # Common Factorization Logic (For Print)
+    common_specs = {}
+    if sorted_zones:
+         first_type = sorted_zones[0]['type']
+         if all(z['type'] == first_type for z in sorted_zones): common_specs['Type'] = first_type
+         
+         def get_vit(zparams): return str(zparams.get('vitrage_resume', '-')).replace('\n', ' ')
+         first_vit = get_vit(sorted_zones[0]['params'])
+         if all(get_vit(z['params']) == first_vit for z in sorted_zones): common_specs['Vitrage'] = first_vit
+         
+         def get_grille(zparams): return zparams.get('pos_grille', 'Aucune')
+         first_grille = get_grille(sorted_zones[0]['params'])
+         if all(get_grille(z['params']) == first_grille for z in sorted_zones): 
+             if first_grille != "Aucune": common_specs['Ventilation'] = first_grille
+    
     z_rows = ""
     for z in sorted_zones:
-        p = z['params']
-        remp = p.get('remplissage_global', 'Vitrage')
-        extra = f"Ext: {p.get('vitrage_ext','-')} / Int: {p.get('vitrage_int','-')}" if remp == 'Vitrage' else ""
-        z_rows += f"<tr><td>{z['label']}</td><td>{p.get('type','-')}</td><td>{remp}</td><td>{extra}</td></tr>"
+        # Compact Line Building
+        parts = [f"<strong>{z['label']}</strong> : {int(z['w'])} x {int(z['h'])} mm"]
+        
+        # Specifics
+        if 'Type' not in common_specs: parts.append(f"Type: {z['type']}")
+        
+        v_curr = get_vit(z['params'])
+        if 'Vitrage' not in common_specs: parts.append(f"Vitrage: {v_curr}")
+        
+        # Options
+        opts = []
+        if 'sens' in z['params']: opts.append(f"Sens {z['params']['sens']}")
+        
+        g_curr = get_grille(z['params'])
+        if 'Ventilation' not in common_specs and g_curr != "Aucune": opts.append(f"VMC: {g_curr}")
+        
+        if z['params'].get('h_poignee', 0) > 0: opts.append(f"HP {z['params']['h_poignee']}mm")
+        
+        nb_h = z['params'].get('traverses', 0)
+        nb_v = z['params'].get('traverses_v', 0)
+        if nb_h > 0:
+             ep_t = z['params'].get('epaisseur_traverse', 20)
+             opts.append(f"Trav. {nb_h}H (Ep.{ep_t})")
+             if nb_h == 1 and nb_v == 0:
+                 opts.append(f"Remp. H:{z['params'].get('remp_haut','V')}/B:{z['params'].get('remp_bas','P')}")
+        if nb_v > 0:
+             opts.append(f"PB {nb_v}V")
+        
+        if opts: parts.append(f"Options: {', '.join(opts)}")
+        
+        full_line = " • ".join(parts)
+        # More padding for comfort
+        z_rows += f"<tr><td>{full_line}</td></tr>"
 
     # Pre-calc values
     ref_id = s.get('ref_id', 'F1')
+    
+    # Calc dimensions for Global Panel
+    w_rec = w_d + (2 * s.get('fin_val', 0))
+    h_bot_add = s.get('width_appui', 0) if s.get('is_appui_rap', False) else (s.get('fin_bot', 0) if not s.get('same_bot', False) else s.get('fin_val', 0))
+    h_rec = h_d + s.get('fin_val', 0) + h_bot_add
+
+    # Format Ailettes String
+    if s.get('fin_val', 0) > 0:
+        ail_str = f"{s.get('fin_val',0)}mm (H/G/D) / {s.get('fin_bot', 0) if not s.get('same_bot') else s.get('fin_val',0)}mm (Bas)"
+    else:
+        ail_str = "Sans"
+
+    # Format Common Specs String
+    common_str = ""
+    for k,v in common_specs.items():
+        common_str += f"<div class='panel-row'><span class='lbl'>{k} (Commun)</span> <span class='val'>{v}</span></div>"
+
     import datetime
     
     html = f"""
@@ -261,37 +327,42 @@ def render_html_menuiserie(s, svg_string, logo_b64):
                 </div>
             </div>
             
-            <!-- TOP SECTION: INFO + ZONES -->
-            <div class="top-section">
-                <!-- LEFT BLOCK -->
-                <div>
-                    <h3>Informations Générales</h3>
-                    <div class="panel">
-                        <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('qte_val', 1)}</span></div>
-                        <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('width_dorm')} x {s.get('height_dorm')} mm</span></div>
-                        <div class="panel-row"><span class="lbl">Côtes</span> <span class="val">{s.get('dim_type', 'Tableau')}</span></div>
-                        <div class="panel-row"><span class="lbl">Pose</span> <span class="val">{s.get('pose_type')}</span></div>
-                        <div class="panel-row"><span class="lbl">Dormant</span> <span class="val">{s.get('frame_thig')} mm</span></div>
-                        <div class="panel-row"><span class="lbl">Ailettes</span> <span class="val">H/G/D:{s.get('fin_val')} | Bas:{s.get('fin_bot') if not s.get('same_bot') else s.get('fin_val')} mm</span></div>
-                        <div class="panel-row"><span class="lbl">Couleur Int.</span> <span class="val">{s.get('col_in')}</span></div>
-                        <div class="panel-row"><span class="lbl">Couleur Ext.</span> <span class="val">{s.get('col_ex')}</span></div>
-                    </div>
-                </div>
-                
-                <!-- RIGHT BLOCK -->
-                <div>
-                    <h3>Détails des Zones</h3>
-                    <div class="panel">
-                        <table>
-                            <thead><tr><th>Zone</th><th>Ouvrant</th><th>Rempl.</th><th>Détails</th></tr></thead>
-                            <tbody>{z_rows}</tbody>
-                        </table>
-                    </div>
+            <!-- STACKED SECTIONS -->
+            
+            <!-- 1. INFORMATIONS GENERALES -->
+            <div class="section-block">
+                <h3>Informations Générales</h3>
+                <div class="panel">
+                    <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
+                    <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('qte_val', 1)}</span></div>
+                    <div class="panel-row"><span class="lbl">Projet</span> <span class="val">{s.get('proj_type', 'Rénovation')}</span></div>
+                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('mat_type', 'PVC')}</span></div>
+                    <div class="panel-row"><span class="lbl">Pose</span> <span class="val">{s.get('pose_type')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dormant</span> <span class="val">{s.get('frame_thig')} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Ailettes</span> <span class="val">{ail_str}</span></div>
+                    <div class="panel-row"><span class="lbl">Appui</span> <span class="val">{'OUI ('+str(s.get('width_appui'))+'mm)' if s.get('is_appui_rap') else 'NON'}</span></div>
+                    <div class="panel-row"><span class="lbl">Couleur</span> <span class="val">{s.get('col_in')} (Int) / {s.get('col_ex')} (Ext)</span></div>
+                    <div class="panel-row"><span class="lbl">Type Côtes</span> <span class="val">{s.get('dim_type', 'Tableau')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dos Dormant</span> <span class="val">{w_d} x {h_d} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Recouvrement</span> <span class="val">{w_rec} x {h_rec} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Allège</span> <span class="val">{s.get('h_allege', 0)} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Volet R.</span> <span class="val">{'OUI ('+str(int(s.get('vr_h',0)))+'mm)' if s.get('vr_enable') else 'NON'}</span></div>
+                    {common_str}
                 </div>
             </div>
             
-            <!-- BOTTOM SECTION: PLAN TECHNIQUE -->
-            <div>
+            <!-- 2. DETAILS DES ZONES -->
+            <div class="section-block">
+                <h3>Détails des Zones</h3>
+                <div class="panel">
+                    <table>
+                        <tbody>{z_rows}</tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 3. PLAN TECHNIQUE (New Page) -->
+            <div class="page-break">
                 <h3>Plan Technique</h3>
                 <div class="visual-box">
                     {svg_string}
@@ -3324,68 +3395,118 @@ with c_preview:
             st.code(traceback.format_exc())
 
         # 2. RÉCAPITULATIF SOUS LE DESSIN
+        st.markdown("### 📋 Fiche Technique")
         st.markdown("---")
-        
-        # PREPARE ZONES DATA
+
+        # PREPARE ZONES DATA (moved up for use in recap)
         config_display = flatten_tree(st.session_state.get('zone_tree'), 0,0,0,0)
         sorted_zones = sorted(config_display, key=lambda z: z['id'])
+        s = st.session_state # Ensure s is defined
 
-        # STACKED DISPLAY (Vertical) - No Columns
-        
-        # --- INFO GENERALES ---
-        st.subheader("Info. Générales")
-        s = st.session_state
-        
-        if s.get('is_appui_rap', False):
-            pb_txt = f"Appui Rapp. ({s.get('width_appui', 0)}mm)"
-        else:
-            pb_txt = "Bavette 100x100"
-            
-        # Helper for metrics
-        def kpi(label, value):
-            st.markdown(f"**{label}** : {value}")
+        # Define w_d and h_d for calculations
+        w_d = s.get('width_dorm', 0)
+        h_d = s.get('height_dorm', 0)
 
-        ci1, ci2 = st.columns(2)
-        with ci1:
-            kpi("Repère", s.get('ref_id', 'F1'))
-            kpi("Quantité", s.get('qte_val', 1))
-            kpi("Dimensions", f"{s.get('width_dorm', 0)} x {s.get('height_dorm', 0)}")
-            kpi("Type Côtes", s.get('dim_type', 'Tableau'))
-            kpi("Matériau", s.get('mat_type', 'PVC'))
+        # --- SECTION 1: INFORMATIONS GLOBALES (Strict Schema) ---
+        c1, c2 = st.columns(2)
+        
+        # Calculate Dimensions
+        w_rec = w_d + (2 * s.get('fin_val', 0))
+        # Recouvrement Height: Fab + Ailette Top + Bottom Piece (Appui or Aillette)
+        h_bot_add = s.get('width_appui', 0) if s.get('is_appui_rap', False) else (s.get('fin_bot', 0) if not s.get('same_bot', False) else s.get('fin_val', 0))
+        h_rec = h_d + s.get('fin_val', 0) + h_bot_add
+
+        with c1:
+            st.markdown(f"**Repère** : {s.get('ref_id', 'F1')}")
+            st.markdown(f"**Quantité** : {s.get('qte_val', 1)}")
+            st.markdown(f"**Type de projet** : {s.get('proj_type', 'Rénovation')}")
+            st.markdown(f"**Matériaux** : {s.get('mat_type', 'PVC')}")
+            st.markdown(f"**Type de pose** : {s.get('pose_type', '-')}")
+            st.markdown(f"**Dormant** : {s.get('frame_thig', 70)} mm")
             
-        with ci2:
-            # Remove truncation for full name
-            kpi("Pose", s.get('pose_type', '-'))
-            # Ailettes formatting
-            h_ail = s.get('fin_val', 0)
-            b_ail = s.get('fin_bot', 0) if not s.get('same_bot', False) else h_ail
-            kpi("Ailettes", f"H/G/D: {h_ail}mm | Bas: {b_ail}mm")
-            kpi("Dormant", f"{s.get('frame_thig', 70)} mm")
-            kpi("Couleurs", f"Int: {s.get('col_in','-')} / Ext: {s.get('col_ex','-')}")
+            # Ailettes
+            if s.get('fin_val', 0) > 0:
+                 st.markdown(f"**Ailettes** : {s.get('fin_val',0)}mm (H/G/D) / {s.get('fin_bot', 0) if not s.get('same_bot') else s.get('fin_val',0)}mm (Bas)")
+            else:
+                 st.markdown(f"**Ailettes** : Sans")
+            
+        with c2:
+             # Appui Rapporté ?
+             if s.get('is_appui_rap', False):
+                 st.markdown(f"**Appui rapporté** : OUI ({s.get('width_appui')}mm)")
+             else:
+                 st.markdown(f"**Appui rapporté** : NON")
+
+             st.markdown(f"**Couleur** : {s.get('col_in','-')} (Int) / {s.get('col_ex','-')} (Ext)")
+             st.markdown(f"**Type de côtes** : {s.get('dim_type', 'Tableau')}")
+             st.markdown(f"**Dim. Dos de Dormant** : {w_d} x {h_d} mm")
+             st.markdown(f"**Dim. Recouvrement Int.** : {w_rec} x {h_rec} mm")
+             st.markdown(f"**Hauteur d'allège** : {s.get('h_allege', 0)} mm")
+             
+             # Volet Roulant
+             if s.get('vr_enable'):
+                  st.markdown(f"**Volet Roulant** : OUI ({int(s.get('vr_h',0))}mm)")
+             else:
+                  st.markdown(f"**Volet Roulant** : NON")
 
         st.markdown("---")
         
-        # --- DETAIL ZONES ---
-        st.subheader("Détail Zones")
+        # --- SECTION 2: DETAILS PAR ZONE (Strict Schema) ---
+        st.markdown("#### Détails par Zone")
         
-        # Container with slight background
-        with st.container():
-            for z in sorted_zones:
-                remp_global = z['params'].get('remplissage_global', 'Vitrage')
-                extra_info = ""
-                if remp_global == "Vitrage":
-                    if 'vitrage_resume' in z['params']:
-                         extra_info = f" | {z['params']['vitrage_resume']}"
-                    else:
-                         extra_info = f" | {z['params'].get('vitrage_ext')} / {z['params'].get('vitrage_int')}"
-                
-                grille_info = ""
-                if z['params'].get('pos_grille') and z['params'].get('pos_grille') != "Aucune":
-                    grille_info = f" | 💨 {z['params'].get('pos_grille')}"
+        for i, z in enumerate(sorted_zones):
+             # Schema: Match User Request
+             # 1. Dim Zone
+             # 2. Type Config
+             # 3. Traverse ? (Epaisseur, Remplissage H/B)
+             # 4. Type Vitrage
+             # 5. Ventilation
+             
+             parts = []
+             # 1. Dimensions
+             parts.append(f"**{z['label']}** : {int(z['w'])} x {int(z['h'])} mm")
+             
+             # 2. Type Config
+             parts.append(f"Config : {z['type']}")
+             
+             # 3. Traverses Logic
+             nb_h = z['params'].get('traverses', 0)
+             # Note: User prompt implies "Traverse" singular/list. 
+             # If traverse exists, show details.
+             if nb_h > 0:
+                 ep_t = z['params'].get('epaisseur_traverse', 20)
+                 parts.append(f"Traverse : {nb_h} Horiz.")
+                 parts.append(f"Ep. {ep_t}mm")
+                 # Remplissage Haut/Bas check (Only implies if Soubassement/1H)
+                 if nb_h == 1 and z['params'].get('traverses_v', 0) == 0:
+                      parts.append(f"Remp. Haut: {z['params'].get('remp_haut','Vitrage')}")
+                      parts.append(f"Remp. Bas: {z['params'].get('remp_bas','Panneau')}")
+             else:
+                 # Check Petits Bois / Muntins Grid if not strictly a 'Traverse' divider
+                 nb_v = z['params'].get('traverses_v', 0)
+                 if nb_v > 0:
+                      parts.append(f"Petits Bois : {nb_v} Vert.")
+             
+             # 4. Vitrage / Remplissage Global
+             # If Remplissage Global is used (no split traverse logic overriding it)
+             remp_g = z['params'].get('remplissage_global', 'Vitrage')
+             if remp_g == "Vitrage":
+                  # Clean Vitrage String
+                  v_str = str(z['params'].get('vitrage_resume', '-')).replace('\n', ' ')
+                  parts.append(f"Vitrage : {v_str}")
+             else:
+                  parts.append(f"Remplissage : Panneau Plein")
+                  
+             # 5. Ventilation
+             g_pos = z['params'].get('pos_grille', 'Aucune')
+             if g_pos != "Aucune":
+                  parts.append(f"Ventilation : {g_pos}")
+             else:
+                  parts.append(f"Ventilation : Non")
 
-                # One line per zone
-                st.markdown(f"🔹 **{z['label']} ({z['type']})** : {remp_global}{extra_info}{grille_info}")
-                
+             # Render
+             st.markdown(" • ".join(parts))
+        
         st.markdown("---")
         
         # Button for Printing
