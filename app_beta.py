@@ -4065,13 +4065,41 @@ def render_annexes():
                          # V73: Revert to simple iframe as it worked locally.
                          # Height set to 1200px.
                          # JS Blob solution for Mobile/Secure Browsers
-                         import uuid
-                         func_id = f"open_pdf_{str(uuid.uuid4())[:8]}"
+                         import streamlit.components.v1 as components
                          
-                         st.markdown(f'''
+                         # Ensure one-line base64
+                         b64_clean = base64_pdf.replace('\n', '')
+                         
+                         btn_html = f'''
+                         <!DOCTYPE html>
+                         <html>
+                         <head>
+                         <style>
+                             body {{ margin: 0; padding: 0; }}
+                             button {{
+                                 display: block;
+                                 width: 100%;
+                                 padding: 12px 0;
+                                 background-color: #ff4b4b;
+                                 color: white;
+                                 border: none;
+                                 cursor: pointer;
+                                 text-align: center;
+                                 border-radius: 8px;
+                                 font-weight: bold;
+                                 font-family: sans-serif;
+                                 font-size: 16px;
+                                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                             }}
+                             button:hover {{ background-color: #ff2b2b; }}
+                             button:active {{ transform: translateY(1px); }}
+                         </style>
+                         </head>
+                         <body>
+                             <button onclick="openPdf()">📱 OUVRIR LE PDF EN PLEIN ÉCRAN</button>
                              <script>
-                                function {func_id}() {{
-                                    const b64 = "{base64_pdf}";
+                                function openPdf() {{
+                                    const b64 = "{b64_clean}";
                                     const bin = atob(b64);
                                     const len = bin.length;
                                     const arr = new Uint8Array(len);
@@ -4083,24 +4111,10 @@ def render_annexes():
                                     window.open(url, "_blank");
                                 }}
                              </script>
-                             <button onclick="{func_id}()" style="
-                                 display: inline-block;
-                                 width: 100%;
-                                 padding: 12px 20px;
-                                 background-color: #ff4b4b;
-                                 color: white;
-                                 border: none;
-                                 cursor: pointer;
-                                 text-align: center;
-                                 border-radius: 8px;
-                                 font-weight: bold;
-                                 margin-bottom: 15px;
-                                 font-size: 16px;
-                                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                             ">
-                                 📱 OUVRIR LE PDF EN PLEIN ÉCRAN
-                             </button>
-                         ''', unsafe_allow_html=True)
+                         </body>
+                         </html>
+                         '''
+                         components.html(btn_html, height=60)
                          
                          pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1200" type="application/pdf"></iframe>'
                          st.markdown(pdf_display, unsafe_allow_html=True)
