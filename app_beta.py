@@ -1072,7 +1072,7 @@ EPAISSEURS = ["3 mm", "4 mm", "5 mm", "6 mm", "8 mm", "10 mm", "12 mm"]
 FEUILLETES = ["33.2", "44.2", "SP10", "55.2", "SP512", "66.2", "SP514", "SP615B", "88.2", "10.10.2", "12.12.2"]
 ALL_GLASS = EPAISSEURS + FEUILLETES
 
-TYPES_VERRE = ["Clair", "Imprimé 200", "Dépoli", "Armé"]
+TYPES_VERRE = ["Clair", "Imprimé 200", "Dépoli", "Armé", "Trempé"]
 
 VIDE_AIR = ["6 mm", "8 mm", "10 mm", "12 mm", "14 mm", "16 mm", "18 mm", "20 mm", "24 mm"]
 
@@ -3500,10 +3500,35 @@ def render_volet_form():
             
         # Qte moved to header
     
-    # 3. Couleurs (Nouveau)
+    # 3. Configuration Lames & Options
+    with st.expander("🛠️ 3. Configuration Lames & Options", expanded=False):
+        # Logic: > 3000 mm -> 50 mm default
+        width = s.get('vr_width', 1000)
+        lame_opts = ["40 mm", "50 mm"]
+        
+        # Init default logic based on Width if not set
+        if 'vr_lame_init_done' not in s or s.get('last_vr_width') != width:
+             s['last_vr_width'] = width
+             s['vr_lame_init_done'] = True
+             if width > 3000:
+                  s['vr_lame_thick'] = "50 mm"
+                  # st.toast("Largeur > 3m : Lames 50mm")
+             elif 'vr_lame_thick' not in s:
+                  s['vr_lame_thick'] = "40 mm"
+
+        curr = s.get('vr_lame_thick', "40 mm")
+        idx = 1 if curr == "50 mm" else 0
+        s['vr_lame_thick'] = st.selectbox("Épaisseur des Lames", lame_opts, index=idx, key="vr_lame_k")
+        if width > 3000 and s['vr_lame_thick'] == "40 mm":
+             st.warning("Attention : Pour une largeur > 3m, 50 mm est recommandé.")
+
+        s['vr_bord_mer'] = st.checkbox("Thermique bord de mer", key="vr_bdm")
+        st.info("ℹ️ Coulisses : L 56 x P 30 mm")
+
+    # 4. Couleurs (Nouveau)
     col_opts = ["Blanc 9010", "Gris Anthracite 7016", "Gris Clair 7035", "Noir 2100", "Ivoire 1015", "Chêne Doré", "Autre (RAL)"]
     
-    with st.expander("🎨 Couleurs", expanded=False):
+    with st.expander("🎨 4. Couleurs", expanded=False):
         # Helper to render color select + input
         def color_picker(label, key_prefix):
             c_sel = st.selectbox(label, col_opts, index=0, key=f"{key_prefix}_sel")
@@ -3520,8 +3545,8 @@ def render_volet_form():
             s['vr_col_tablier'] = color_picker("Couleur Tablier", "vr_c_tab")
             s['vr_col_lame_fin'] = color_picker("Couleur Lame Finale", "vr_c_lame")
 
-    # 4. Manoeuvre
-    with st.expander("🎮 Manoeuvre / Motorisation", expanded=False):
+    # 5. Manoeuvre
+    with st.expander("🎮 5. Manoeuvre / Motorisation", expanded=False):
         mech = st.radio("Type", ["Manuel", "Motorisé"], horizontal=True, index=0 if s.get('vr_type') == "Manuel" else 1, key="vr_mech_in")
         s['vr_type'] = mech
         
@@ -3566,8 +3591,8 @@ def render_volet_form():
                     s['vr_cable_len'] = c_len
 
 
-    # 5. Observations
-    with st.expander("📝 Observations", expanded=False):
+    # 6. Observations
+    with st.expander("📝 6. Observations", expanded=False):
          st.session_state['vr_obs'] = st.text_area("Notes", value=st.session_state.get('vr_obs', ''), key="vr_obs_in")
 
     # 6. Gestion / Sauvegarde
@@ -3748,7 +3773,9 @@ def generate_svg_volet():
     svg += f'<rect x="{coulisse_w}" y="{coffre_h}" width="{dw - (2*coulisse_w)}" height="{dh - coffre_h}" style="{style_tablier}" />'
     
     # Horizontal Slats Lines
-    slat_h = 10 * scale
+    lame_type = s.get('vr_lame_thick', '40 mm')
+    base_slat_mm = 50 if "50" in lame_type else 40
+    slat_h = base_slat_mm * scale # Real scale
     curr_y = coffre_h + slat_h
     while curr_y < dh - (20 * scale): # Leave room for bottom slat
         svg += f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />'
@@ -4064,7 +4091,7 @@ def serialize_vitrage_config():
     # V10 FIX: Exclude ephemeral button keys from save
     data = {}
     for k, v in st.session_state.items():
-        if k.startswith('vit_'):
+        if k.startswith('vit_') or k.startswith('v_'):
             # Filter out known button keys
             if 'btn' in k or 'updup' in k or 'save_u' in k or 'del_u' in k or 'add_new' in k:
                 continue
@@ -4155,8 +4182,9 @@ def render_vitrage_form():
         with c_ext:
             st.markdown("**Extérieur**")
             s['vit_ep_ext'] = st.selectbox("Épaisseur Ext", ["4 mm", "6 mm", "8 mm", "10 mm", "33.2", "44.2", "SP10", "Panneau"], key="v_ep_e")
-            s['vit_type_ext'] = st.selectbox("Type Ext", ["Clair", "Dépoli", "Imprimé 200", "Granité", "Delta Mat", "Antelio"], key="v_ty_e")
+            s['vit_type_ext'] = st.selectbox("Type Ext", TYPES_VERRE + ["Granité", "Delta Mat", "Antelio"], key="v_ty_e")
             s['vit_couche_ext'] = st.selectbox("Couche Ext", ["Aucune", "FE (Faible Émissivité)", "Contrôle Solaire"], key="v_co_e")
+            s['vit_fac_ext'] = st.selectbox("Façonnage Ext", ["CB", "JPP", "JPI"], key="v_fa_e")
             
         # LAME D'AIR (Si Double)
         with c_air:
@@ -4177,6 +4205,7 @@ def render_vitrage_form():
                 s['vit_ep_int'] = st.selectbox("Épaisseur Int", ["4 mm", "6 mm", "8 mm", "10 mm", "33.2", "44.2"], key="v_ep_i")
                 s['vit_type_int'] = st.selectbox("Type Int", ["Clair", "Dépoli"], key="v_ty_i")
                 s['vit_couche_int'] = st.selectbox("Couche Int", ["Aucune", "FE (Faible Émissivité)"], index=1, key="v_co_i")
+                s['vit_fac_int'] = st.selectbox("Façonnage Int", ["CB", "JPP", "JPI"], key="v_fa_i")
             else:
                  st.markdown("")
                  # V9 Polish: Removed Info
@@ -4192,14 +4221,47 @@ def render_vitrage_form():
             resume = "Panneau Plein"
         s['vit_resume'] = resume
 
-    # 4. Dimensions
-    with st.expander("📐 4. Dimensions & Petits bois", expanded=False):
+    # 4. Dimensions & Formes
+    with st.expander("📐 4. Dimensions & Formes", expanded=False):
+        # SHAPE SELECTION
+        # SHAPE SELECTION
+        shape_opts = ["Rectangulaire", "Forme A1 (Trapèze)", "Forme A2 (Pan Coupé)", "Forme B (Trapèze Double)", "Forme C (Cintre)", "Forme D (Rond/Ovale)", "Forme E (Découpe)"]
+        s['vit_shape'] = st.selectbox("Forme du vitrage", shape_opts, key="vit_shape_sel")
+        
         dim_types = ["Cotes Fabrication", "Clair de vue", "Fond de feuillure"]
         s['vit_dim_type'] = st.selectbox("Type de côtes", dim_types, key="vit_dim_t")
         
         c_w, c_h = st.columns(2)
         s['vit_width'] = c_w.number_input("Largeur (mm)", 0, 10000, 1000, 10, key="vit_w")
         s['vit_height'] = c_h.number_input("Hauteur (mm)", 0, 10000, 1000, 10, key="vit_h")
+        
+        # DYNAMIC SHAPE PARAMS
+        if s['vit_shape'] != "Rectangulaire":
+            st.markdown("##### Paramètres de la Forme")
+            c_s1, c_s2 = st.columns(2)
+            if "Forme A1" in s['vit_shape']:
+                s['vit_sh_h1'] = c_s1.number_input("Hauteur Petite (H1)", 0, 10000, 500, key="v_sh_a_h1")
+                s['vit_sh_h2'] = c_s2.number_input("Hauteur Grande (H2)", 0, 10000, 1000, key="v_sh_a_h2")
+            elif "Forme A2" in s['vit_shape']:
+                s['vit_sh_lc'] = c_s1.number_input("Largeur Coupe (Lx)", 0, 5000, 200, key="v_sh_a2_lx")
+                s['vit_sh_hc'] = c_s2.number_input("Hauteur Coupe (Ly)", 0, 5000, 200, key="v_sh_a2_ly")
+            elif "Forme B" in s['vit_shape']:
+                c_a, c_b = st.columns(2)
+                s['vit_sh_h1'] = c_a.number_input("Hauteur Gauche (H1)", 0, 10000, 500, key="v_sh_b_h1")
+                s['vit_sh_h2'] = c_b.number_input("Hauteur Droite (H2)", 0, 10000, 500, key="v_sh_b_h2")
+                c_c, c_d, c_e = st.columns(3)
+                s['vit_sh_h3'] = c_c.number_input("Hauteur Pointe/Plat (H3)", 0, 10000, 750, key="v_sh_b_h3")
+                s['vit_sh_l1'] = c_d.number_input("Pos. Début (L1)", 0, 10000, 500, key="v_sh_b_l1")
+                s['vit_sh_l2'] = c_e.number_input("Largeur Plat (L2)", 0, 10000, 0, key="v_sh_b_l2")
+            elif "Forme C" in s['vit_shape']:
+                s['vit_sh_fleche'] = c_s1.number_input("Flèche (mm)", 0, 5000, 200, key="v_sh_c_f")
+                s['vit_sh_ray'] = c_s2.number_input("Rayon (mm)", 0, 10000, 0, key="v_sh_c_r")
+            elif "Forme D" in s['vit_shape']:
+                st.info("Ellipse définie par Largeur x Hauteur.")
+            elif "Forme E" in s['vit_shape']:
+                s['vit_sh_enc_w'] = c_s1.number_input("Largeur Encoche", 0, 5000, 200, key="v_sh_e_w")
+                s['vit_sh_enc_h'] = c_s2.number_input("Hauteur Encoche", 0, 5000, 200, key="v_sh_e_h")
+            
         s['vit_h_bas'] = st.number_input("Hauteur bas du verre (mm)", 0, 5000, 0, 10, key="vit_hb")
 
         # Petits bois
@@ -4210,8 +4272,50 @@ def render_vitrage_form():
             s['vit_pb_vert'] = c_pb2.number_input("Traver. Vert.", 0, 20, 0, key="vit_pb_v")
             s['vit_pb_thick'] = c_pb3.number_input("Épaisseur (mm)", 10, 50, 26, key="vit_pb_th")
 
-    # 5. Observations
-    with st.expander("📝 5. Observations", expanded=False):
+    # 5. Usinage / Façonnage Spécial
+    with st.expander("🛠️ 5. Usinage / Façonnage Spécial", expanded=False):
+        s['vit_usi_enable'] = st.checkbox("Activer l'usinage", key="v_usi_en")
+        if s['vit_usi_enable']:
+            st.markdown("**Trous**")
+            nb_trous = st.number_input("Nombre de trous", 0, 10, 0, key="v_nb_trous")
+            s['vit_nb_trous'] = nb_trous
+            for i in range(nb_trous):
+                st.markdown(f"**Trou {i+1}**")
+                # V15 Polish: Selectbox on its own row
+                st.selectbox(f"Bord (Trou {i+1})", ["1 (Bas G)", "2 (Haut G)", "3 (Haut D)", "4 (Bas D)"], index=0, key=f"v_t_ref_{i}")
+                
+                c_bx, c_by, c_bd = st.columns(3)
+                c_bx.number_input(f"X (mm)", 0, 5000, 100, key=f"v_t_x_{i}")
+                c_by.number_input(f"Y (mm)", 0, 5000, 100, key=f"v_t_y_{i}")
+                c_bd.number_input(f"Dia (mm)", 0, 200, 10, key=f"v_t_d_{i}")
+            
+            st.markdown("---")
+            st.markdown("**Encoches (Rectangulaires)**")
+            nb_enc = st.number_input("Nombre d'encoches", 0, 4, 0, key="v_nb_enc")
+            s['vit_nb_enc'] = nb_enc
+            for i in range(nb_enc):
+                st.markdown(f"**Encoche {i+1}**")
+                # V15 Polish: Selectbox on its own row
+                st.selectbox(f"Bord (Encoche {i+1})", ["1 (Bas G)", "2 (Haut G)", "3 (Haut D)", "4 (Bas D)"], index=0, key=f"v_e_ref_{i}")
+                
+                c_ex, c_ey, c_ew, c_eh = st.columns(4)
+                c_ex.number_input(f"X (mm)", 0, 5000, 0, key=f"v_e_x_{i}")
+                c_ey.number_input(f"Y (mm)", 0, 5000, 0, key=f"v_e_y_{i}")
+                c_ew.number_input(f"Largeur", 0, 5000, 50, key=f"v_e_w_{i}")
+                c_eh.number_input(f"Hauteur", 0, 5000, 50, key=f"v_e_h_{i}")
+
+            st.markdown("---")
+            # Mickey 101 - UI Update per Request
+            # 1. Checkbox First
+            s['vit_mickey_101'] = st.checkbox("Encoche 101 (Mickey)", key="v_mic_on")
+            
+            # 2. Logic if Checked
+            if s['vit_mickey_101']:
+                 s['vit_mickey_side'] = st.radio("Côté", ["Gauche", "Droite"], horizontal=True, key="v_mic_side")
+                 st.caption("ℹ️ Axe du carré à 65 mm du bord")
+
+    # 6. Observations
+    with st.expander("📝 6. Observations", expanded=False):
         s['vit_obs'] = st.text_area("Notes", value=s.get('vit_obs', ''), key="vit_obs_in")
         
     # --- ACTIONS CRUD ---
@@ -4273,6 +4377,696 @@ def generate_svg_vitrage():
     w_mm = s.get('vit_width', 1000)
     h_mm = s.get('vit_height', 1000)
     
+    # Layers (Z-Index equivalent via sort)
+    # 0: BG, 10: Frame, 20: Glass, 30: Petit Bois/Usi, 40: Dims
+    z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
+
+    # HELPER: Draw Dimension (Local helper for SHAPES)
+    def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
+        import math
+        d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        if d == 0: return ""
+        ux, uy = (x2-x1)/d, (y2-y1)/d
+        nx, ny = -uy, ux # Initial Normal
+        
+        mx, my = (x1+x2)/2, (y1+y2)/2
+        
+        # Auto-Flip if avoid_point provided (Center of glass)
+        if avoid_point:
+            cx, cy = avoid_point
+            # Vector Center -> Midpoint
+            vx, vy = mx - cx, my - cy
+            # Dot product with Normal
+            dot = nx * vx + ny * vy
+            if dot < 0:
+                nx, ny = -nx, -ny
+                
+        # Apply Offset
+        ax, ay = x1 + nx*offset, y1 + ny*offset
+        bx, by = x2 + nx*offset, y2 + ny*offset
+        
+        mk_len = 10
+        out = ""
+        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
+        
+        # Ticks
+        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        
+        mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
+        
+        # V16 Fix: Text Offset must follow the direction of the Line Offset
+        # If offset is negative, we moved Opposite to Normal. Text must move Opposite too.
+        # This keeps text "Away from the glass" relative to the line.
+        sign_off = 1 if offset >= 0 else -1
+        txt_gap = 12 # Reduced to "glue" text to line (12px center-to-line)
+        
+        tx = mx_dim + nx * (sign_off * txt_gap)
+        ty = my_dim + ny * (sign_off * txt_gap)
+        
+        # Logic for Suffix (Hack for specific requirements)
+        suffix = ""
+        if "Axe" in label_prefix: suffix = " mm"
+        
+        # Simple Text (No Halo)
+        out += f'<text x="{tx}" y="{ty}" fill="{color}" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}{suffix}</text>'
+        return out
+
+    # 2. Logic: Glass Only?
+    # Corrected Logic: Check Material (vit_mat) AND Type Mode
+    # If "Porte Sécurit", "Vitrage Seul", or "Mur" -> No Frame
+    mat = s.get('vit_mat', '')
+    glass_only = (mat in ["Porte Sécurit", "Vitrage Seul", "Mur"] or s.get('vit_type_mode') == "Panneau")
+    
+    # 3. Define Draw Area
+    margin = 300 # Increased to 300 to stop cutting off top dimensions
+    vb_w = w_mm + (margin*2)
+    vb_h = h_mm + (margin*2)
+    
+    # Calculate origin
+    x0, y0 = margin, margin
+    
+    svg_list = []
+    
+    # Frame/Glass Rect Logic
+    th_inner = 26
+    th_outer = 14
+    
+    # Default: Frame Draw
+    if glass_only:
+        # Just Glass Area - No Frame Offset
+        ix, iy, iw, ih = x0, y0, w_mm, h_mm
+        # Dashed Outline for context
+        svg_list.append((z_outer, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="none" stroke="#ddd" stroke-dasharray="4" />'))
+    else:
+        # Draw Frame (Dormant)
+        ox, oy = x0 - th_outer, y0 - th_outer
+        ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
+        
+        svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+
+        # Inner Frame
+        col_stroke = "#AAA"
+        svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
+        
+        # Calculate Glass Position (Inside Frame)
+        ix, iy = x0 + th_inner, y0 + th_inner
+        iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
+        
+        svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+
+    # 4. Glass & Shapes
+    g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
+    shape = s.get('vit_shape', 'Rectangulaire')
+    path_d = ""
+    
+    # Center Point for Dimension Orientation (Avoid Point)
+    center_pt = (ix + iw/2, iy + ih/2)
+    
+    if shape == "Rectangulaire":
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+        # RESTORED: No explicit Blue Dims here. We rely on the Global Frame dims (Black) at the end.
+        
+    elif "Forme A1" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        y_tl, y_tr = (iy + ih) - h1, (iy + ih) - h2
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_tr} L {ix},{y_tl} z"
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_tl, h1, 80, "red", "H1=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_tr, h2, 80, "red", "H2=", avoid_point=center_pt)))
+        
+    elif "Forme A2" in shape: # Pan Coupé
+        lx, ly = s.get('vit_sh_lc', 200), s.get('vit_sh_hc', 200)
+        path_d = f"M {ix},{iy} L {ix+iw-lx},{iy} L {ix+iw},{iy+ly} L {ix+iw},{iy+ih} L {ix},{iy+ih} z"
+        svg_list.append((z_dim, draw_dim(ix+iw-lx, iy, ix+iw, iy, lx, 80, "red", "Lx=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ly, ly, 80, "red", "Ly=", avoid_point=center_pt)))
+        
+    elif "Forme B" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        h3 = s.get('vit_sh_h3', ih)
+        l1 = s.get('vit_sh_l1', iw/2)
+        l2 = s.get('vit_sh_l2', 0)
+        
+        y_l, y_r = (iy + ih) - h1, (iy + ih) - h2
+        y_peak = (iy + ih) - h3
+        
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_r} L {ix+l1+l2},{y_peak} L {ix+l1},{y_peak} L {ix},{y_l} z"
+        
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_l, h1, 80, "red", "H1=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_r, h2, 80, "red", "H2=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1, y_peak, h3, -20, "red", "H3=", avoid_point=None))) 
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+l1, iy+ih, l1, 120, "red", "L1=", avoid_point=center_pt))) 
+        if l2 > 0:
+             svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1+l2, iy+ih, l2, 120, "red", "L2=", avoid_point=center_pt)))
+
+    elif "Forme C" in shape:
+        fleche = s.get('vit_sh_fleche', 0)
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{iy+fleche} Q {ix+(iw/2)},{iy} {ix},{iy+fleche} z"
+        svg_list.append((z_dim, draw_dim(ix+iw/2, iy, ix+iw/2, iy+fleche, fleche, -40, "red", "F=")))
+        
+    elif "Forme D" in shape:
+        rx, ry = iw / 2, ih / 2
+        cx, cy = ix + rx, iy + ry
+        path_d = f"M {cx-rx},{cy} a {rx},{ry} 0 1,0 {2*rx},0 a {rx},{ry} 0 1,0 -{2*rx},0"
+        
+    else: # Default
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+
+    svg_list.append((z_glass, f'<path d="{path_d}" fill="{g_fill}" stroke="#888" stroke-width="2" />'))
+
+    # 5. Machining (Usinage)
+    if s.get('vit_usi_enable'):
+        # Trous
+        nb_t = s.get('vit_nb_trous', 0)
+        for i in range(nb_t):
+             tx = s.get(f"v_t_x_{i}", 0)
+             ty = s.get(f"v_t_y_{i}", 0)
+             td = s.get(f"v_t_d_{i}", 10)
+             ref = s.get(f"v_t_ref_{i}", "1")
+             ref = str(ref) # Ensure string
+             
+             # Calculate Absolute Coords & Dimensions
+             # Default 2 (Top Left)
+             cx, cy = ix + tx, iy + ty
+             
+             if "1" in ref: # Bas Gauche
+                 cx = ix + tx
+                 cy = (iy + ih) - ty
+                 # Dim X (Bottom)
+                 svg_list.append((z_dim, draw_dim(ix, iy+ih, cx, iy+ih, tx, 80, "orange", "X")))
+                 # Dim Y (Left) - Corrected: Offset -80 (Left)
+                 svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, cy, ty, -80, "orange", "Y")))
+                 
+             elif "3" in ref: # Haut Droite
+                 cx = (ix + iw) - tx
+                 cy = iy + ty
+                 # Dim X (Top) - Corrected: Offset +80 (Up) relative to Reverse Vector?
+                 # Vector (-1,0). Normal (0,-1) [Up]. Offset +80 -> Up.
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy, cx, iy, tx, 80, "orange", "X")))
+                 # Dim Y (Right) - Corrected: Offset -80 (Right) relative to Left Normal?
+                 # Vector (0,1). Normal (-1,0) [Left]. Offset -80 -> Right. Correct.
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, cy, ty, -80, "orange", "Y")))
+                 
+             elif "4" in ref: # Bas Droite
+                 cx = (ix + iw) - tx
+                 cy = (iy + ih) - ty
+                 # Dim X (Bottom)
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, cx, iy+ih, tx, -80, "orange", "X")))
+                 # Dim Y (Right) - Corrected: Offset +80 (Right) relative to Right Normal?
+                 # Vector (0,-1). Normal (1,0) [Right]. Offset +80 -> Right. Correct.
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, cy, ty, 80, "orange", "Y")))
+                 
+             else: # 2 or Default (Haut Gauche)
+                 cx = ix + tx
+                 cy = iy + ty
+                 # Dim X (Top)
+                 svg_list.append((z_dim, draw_dim(ix, iy, cx, iy, tx, -80, "orange", "X")))
+                 # Dim Y (Left)
+                 svg_list.append((z_dim, draw_dim(ix, iy, ix, cy, ty, 80, "orange", "Y")))
+
+             svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
+             # V16 Polish: Label Outside & Bigger
+             svg_list.append((z_pb, f'<text x="{cx}" y="{cy - (td/2) - 15}" font-size="16" fill="red" text-anchor="middle">Ø{td}</text>'))
+        
+        # Encoches
+        nb_e = s.get('vit_nb_enc', 0)
+        for i in range(nb_e):
+             ex = s.get(f"v_e_x_{i}", 0)
+             ey = s.get(f"v_e_y_{i}", 0)
+             ew = s.get(f"v_e_w_{i}", 50)
+             eh = s.get(f"v_e_h_{i}", 50)
+             ref = s.get(f"v_e_ref_{i}", "1")
+             ref = str(ref)
+
+             # Calculate Absolute Coords (Top Left of Notch)
+             nx, ny = ix + ex, iy + ey # Default
+             
+             if "1" in ref: # Bas Gauche (X from Left, Y from Bottom)
+                 nx = ix + ex
+                 ny = (iy + ih) - ey - eh # Top of Notch = Bottom - dist - height
+                 # Dim X (Bottom)
+                 svg_list.append((z_dim, draw_dim(ix, iy+ih, nx, iy+ih, ex, 80, "red", "X", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(nx, iy+ih, nx+ew, iy+ih, ew, 80, "red", "L", avoid_point=None)))
+                 # Dim Y (Left). - Corrected: Offset -80 (Left)
+                 svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, iy+ih-ey, ey, -80, "red", "Y", avoid_point=None)))
+                 # Height - Corrected: Offset -80 (Left)
+                 svg_list.append((z_dim, draw_dim(ix, iy+ih-ey, ix, ny, eh, -80, "red", "H", avoid_point=None)))
+
+             elif "3" in ref: # Haut Droite
+                 nx = (ix + iw) - ex - ew
+                 ny = iy + ey
+                 # Dim X (Top) - Corrected: Offset +80 (Up)
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw-ex, iy, ex, 80, "red", "X", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(ix+iw-ex, iy, nx, iy, ew, 80, "red", "L", avoid_point=None)))
+                 # Dim Y (Right)
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, ny, ey, -80, "red", "Y", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(ix+iw, ny, ix+iw, ny+eh, eh, -80, "red", "H", avoid_point=None)))
+                 
+             elif "4" in ref: # Bas Droite
+                 nx = (ix + iw) - ex - ew
+                 ny = (iy + ih) - ey - eh
+                 # Dim X (Bottom)
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw-ex, iy+ih, ex, -80, "red", "X", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(ix+iw-ex, iy+ih, nx, iy+ih, ew, -80, "red", "L", avoid_point=None)))
+                 # Dim Y (Right) - Corrected: Offset +80 (Right)
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, iy+ih-ey, ey, 80, "red", "Y", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih-ey, ix+iw, ny, eh, 80, "red", "H", avoid_point=None)))
+             
+             else: # 2 (Haut Gauche)
+                 nx = ix + ex
+                 ny = iy + ey
+                 # Dim X (Top)
+                 svg_list.append((z_dim, draw_dim(ix, iy, nx, iy, ex, -80, "red", "X", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(nx, iy, nx+ew, iy, ew, -80, "red", "L", avoid_point=None)))
+                 # Dim Y (Left)
+                 svg_list.append((z_dim, draw_dim(ix, iy, ix, ny, ey, 80, "red", "Y", avoid_point=None)))
+                 svg_list.append((z_dim, draw_dim(ix, ny, ix, ny+eh, eh, 80, "red", "H", avoid_point=None)))
+
+             # V16 Polish: White Fill (Removed Glass)
+             svg_list.append((z_pb, f'<rect x="{nx}" y="{ny}" width="{ew}" height="{eh}" fill="white" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
+
+        # Mickey 101 (With Side Logic)
+        if s.get('vit_mickey_101'):
+            mickey_w, mickey_h = 165, 46
+            side = s.get('vit_mickey_side', 'Gauche')
+            
+            # Position Logic
+            if side == "Gauche":
+                 p_start = ix # Flush Left
+                 p_end = ix + mickey_w # Extend Inwards
+                 mx = ix + 65 # Axis
+            else: # Droite
+                 p_start = ix + iw - mickey_w # Flush Right
+                 p_end = ix + iw
+                 mx = ix + iw - 65 # Axis
+            
+            # Draw Function for Notch
+            def draw_mickey(my, is_top):
+                 sign = 1 if is_top else -1
+                 
+                 # Absolute Path to fix "Diagonal Cut" Bug
+                 # Defined by 4 points: Start(Edge), Deep(Inside), End(Deep), End(Edge)
+                 y_edge = my
+                 y_deep = my + (sign * mickey_h)
+                 
+                 d_path = f"M {p_start},{y_edge} L {p_start},{y_deep} L {p_end},{y_deep} L {p_end},{y_edge} Z"
+
+                 # Cutout (White with Red Border)
+                 svg_list.append((z_pb, f'<path d="{d_path}" fill="white" stroke="red" stroke-width="2" />'))
+                 
+                 # Holes Layout (Symmetric 35mm from ends)
+                 x_h1 = p_start + 35
+                 x_h2 = p_start + 130 # 165 - 35
+                 
+                 # Axis X (Carré - 65mm from Edge)
+                 if side == "Gauche":
+                    x_axis = ix + 65
+                 else:
+                    x_axis = (ix + iw) - 65
+
+                 hy = my + (sign * mickey_h * 0.5)
+                 
+                 # Draw Holes (Circles + Crosshair)
+                 for hx in [x_h1, x_h2]:
+                     svg_list.append((z_pb, f'<circle cx="{hx}" cy="{hy}" r="5" fill="white" stroke="red" stroke-width="1.5" />'))
+                     # Crosshair
+                     svg_list.append((z_pb, f'<line x1="{hx-3}" y1="{hy}" x2="{hx+3}" y2="{hy}" stroke="red" stroke-width="1" />'))
+                     svg_list.append((z_pb, f'<line x1="{hx}" y1="{hy-3}" x2="{hx}" y2="{hy+3}" stroke="red" stroke-width="1" />'))
+
+                 # Axe Carré (Vertical Center Line) - Extended
+                 ay_out = my - (sign * 40)
+                 ay_in = my + (sign * (mickey_h + 20))
+                 svg_list.append((z_pb, f'<line x1="{x_axis}" y1="{ay_out}" x2="{x_axis}" y2="{ay_in}" stroke="red" stroke-width="1.5" stroke-dasharray="10,4,2,4" />'))
+                 
+                 # DIMENSIONS (Strictly OUTSIDE Glass & Spaced Out)
+                 # Text is pushed 40px OUT from Line.
+                 # 1. Width Line at 30mm -> Text at 70mm
+                 y_dim_w = my - (sign * 30)
+                 svg_list.append((z_dim, draw_dim(p_start, y_dim_w, p_end, y_dim_w, mickey_w, 20, "red", "", avoid_point=center_pt)))
+                 
+                 # 2. Axis Line at 95mm
+                 y_dim_axis = my - (sign * 95)
+                 if side == "Gauche":
+                     svg_list.append((z_dim, draw_dim(ix, y_dim_axis, x_axis, y_dim_axis, 65, 0, "red", "Axe carré = ", avoid_point=center_pt)))
+                 else:
+                     svg_list.append((z_dim, draw_dim(ix+iw, y_dim_axis, x_axis, y_dim_axis, 65, 0, "red", "Axe carré = ", avoid_point=center_pt)))
+
+                 # 3. Label Encoche (On Blue Zone per Request)
+                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text_anchor="middle" dominant-baseline="middle">Enc. 101</text>'))
+
+            # Draw Top AND Bottom
+            draw_mickey(iy, True)
+            draw_mickey(iy + ih, False)
+             
+    # 5. Petits Bois
+    if s.get('vit_pb_enable'):
+        nb_h = s.get('vit_pb_hor', 0)
+        nb_v = s.get('vit_pb_vert', 0)
+        thick = s.get('vit_pb_thick', 26)
+        
+        if nb_h > 0:
+            step_h = ih / (nb_h + 1)
+            for i in range(nb_h):
+                py = iy + step_h * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
+                if i == 0:
+                    h_gap = step_h
+                    dx_ref = x0 + w_mm + th_outer if not glass_only else x0 + w_mm
+                    draw_dimension_line(svg_list, dx_ref, iy, dx_ref, iy + h_gap, int(h_gap), "", 50, "V", 20, z_dim)
+
+        if nb_v > 0:
+            step_v = iw / (nb_v + 1)
+            for i in range(nb_v):
+                px = ix + step_v * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
+                if i == 0:
+                    w_gap = step_v
+                    draw_dimension_line(svg_list, x0+th_inner, y0-th_outer, x0+th_inner+w_gap, y0-th_outer, int(w_gap), "", -60, "H", 20, z_dim)
+
+    # 6. Global Dimensions (Black/Standard) - RESTORED
+    # Axis Calculations - If glass_only, axis is just glass edge
+    if glass_only:
+        axis_left = x0
+        axis_right = x0 + w_mm
+        axis_top = y0
+        axis_bottom = y0 + h_mm
+    else:
+        axis_left = x0 + (th_inner/2)
+        axis_right = (x0 + w_mm) - (th_inner/2)
+        axis_top = y0 + (th_inner/2)
+        axis_bottom = (y0 + h_mm) - (th_inner/2)
+    
+    # Width (Global)
+    draw_dimension_line(svg_list, 
+        axis_left, axis_bottom, 
+        axis_right, axis_bottom, 
+        int(w_mm), 
+        "", 160, "H", 32, z_dim, leader_fixed_start=axis_bottom)
+    
+    # Height (Global)
+    draw_dimension_line(svg_list, 
+        axis_left, axis_top, 
+        axis_left, axis_bottom, 
+        int(h_mm), 
+        "", 180, "V", 32, z_dim, leader_fixed_start=axis_left)
+    
+    # NO Cleanup of these dims. User wants them.
+
+    # 7. Render
+    svg_list.sort(key=lambda x: x[0])
+    content = "".join([item[1] for item in svg_list])
+    
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
+    # 7. Render
+    svg_list.sort(key=lambda x: x[0])
+    content = "".join([item[1] for item in svg_list])
+    
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
+    """Génère le dessin SVG Vitrage (Style Menuiserie V73) - V7 White + Axis Dims"""
+    s = st.session_state
+    
+    # 1. Setup Canvas
+    w_mm = s.get('vit_width', 1000)
+    h_mm = s.get('vit_height', 1000)
+    
+    # Layers (Z-Index equivalent via sort)
+    # 0: BG, 10: Frame, 20: Glass, 30: Petit Bois/Usi, 40: Dims
+    z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
+
+    # HELPER: Draw Dimension
+    def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
+        import math
+        d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        if d == 0: return ""
+        ux, uy = (x2-x1)/d, (y2-y1)/d
+        nx, ny = -uy, ux # Initial Normal
+        
+        mx, my = (x1+x2)/2, (y1+y2)/2
+        
+        # Auto-Flip if avoid_point provided (Center of glass)
+        if avoid_point:
+            cx, cy = avoid_point
+            # Vector Center -> Midpoint
+            vx, vy = mx - cx, my - cy
+            # Dot product with Normal
+            dot = nx * vx + ny * vy
+            # If dot < 0, Normal points inwards (opposing V). We want it same direction as V (Outwards).
+            if dot < 0:
+                nx, ny = -nx, -ny
+                
+        # Apply Offset
+        ax, ay = x1 + nx*offset, y1 + ny*offset
+        bx, by = x2 + nx*offset, y2 + ny*offset
+        
+        mk_len = 10
+        out = ""
+        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
+        
+        # Ticks (Oriented with Normal now)
+        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        
+        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        
+        mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
+        txt_offset = 15
+        out += f'<text x="{mx_dim + nx*txt_offset}" y="{my_dim + ny*txt_offset}" fill="{color}" font-size="20" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}</text>'
+        return out
+
+    # 2. Logic: Glass Only?
+    glass_only = (s.get('vit_type_mode') == "Verre Seul" or s.get('vit_type_mode') == "Panneau")
+    
+    # 3. Define Draw Area
+    margin = 150
+    vb_w = w_mm + (margin*2)
+    vb_h = h_mm + (margin*2)
+    
+    # Calculate origin (top-left of drawing)
+    x0, y0 = margin, margin
+    
+    svg_list = []
+    
+    # Frame/Glass Rect Logic
+    th_frame = 40 # Generic frame logic
+    th_inner = 0
+    th_outer = 0
+    
+    ix, iy, iw, ih = x0, y0, w_mm, h_mm # Default Inner (Glass)
+    
+    if glass_only:
+        # Just Glass Area
+        svg_list.append((z_outer, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="none" stroke="#ddd" stroke-dasharray="4" />'))
+    else:
+        # Draw Frame (Dormant)
+        # Assuming generic V7 frame style for visualization
+        th_inner = 26
+        th_outer = 14
+        
+        ox, oy = x0 - th_outer, y0 - th_outer
+        ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
+        
+        svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+
+        # Inner Frame
+        col_stroke = "#AAA"
+        svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
+        
+        ix, iy = x0 + th_inner, y0 + th_inner
+        iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
+        
+        svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+        
+        # Frame Dims (Grey)
+        svg_list.append((z_dim, draw_dim(x0, y0-10, x0+w_mm, y0-10, w_mm, 30, "#888", "L ")))
+        svg_list.append((z_dim, draw_dim(x0-10, y0, x0-10, y0+h_mm, h_mm, 30, "#888", "H ")))
+
+    # 4. Glass & Shapes
+    g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
+    shape = s.get('vit_shape', 'Rectangulaire')
+    path_d = ""
+    
+    # Center Point for Dimension Orientation (Avoid Point)
+    center_pt = (ix + iw/2, iy + ih/2)
+    
+    if shape == "Rectangulaire":
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+        # Explicit Blue Dims for Rectangle (Outside) with large offset
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+iw, iy+ih, iw, 80, "blue", "", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, 80, "blue", "", avoid_point=center_pt)))
+        
+    elif "Forme A1" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        y_tl, y_tr = (iy + ih) - h1, (iy + ih) - h2
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_tr} L {ix},{y_tl} z"
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_tl, h1, 80, "red", "H1=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_tr, h2, 80, "red", "H2=", avoid_point=center_pt)))
+        
+    elif "Forme A2" in shape: # Pan Coupé
+        lx, ly = s.get('vit_sh_lc', 200), s.get('vit_sh_hc', 200)
+        path_d = f"M {ix},{iy} L {ix+iw-lx},{iy} L {ix+iw},{iy+ly} L {ix+iw},{iy+ih} L {ix},{iy+ih} z"
+        svg_list.append((z_dim, draw_dim(ix+iw-lx, iy, ix+iw, iy, lx, 80, "red", "Lx=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ly, ly, 80, "red", "Ly=", avoid_point=center_pt)))
+        
+    elif "Forme B" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        h3 = s.get('vit_sh_h3', ih)
+        l1 = s.get('vit_sh_l1', iw/2)
+        l2 = s.get('vit_sh_l2', 0)
+        
+        y_l, y_r = (iy + ih) - h1, (iy + ih) - h2
+        y_peak = (iy + ih) - h3
+        
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_r} L {ix+l1+l2},{y_peak} L {ix+l1},{y_peak} L {ix},{y_l} z"
+        
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_l, h1, 80, "red", "H1=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_r, h2, 80, "red", "H2=", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1, y_peak, h3, -20, "red", "H3=", avoid_point=None))) 
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+l1, iy+ih, l1, 120, "red", "L1=", avoid_point=center_pt))) 
+        if l2 > 0:
+             svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1+l2, iy+ih, l2, 120, "red", "L2=", avoid_point=center_pt)))
+
+    elif "Forme C" in shape:
+        fleche = s.get('vit_sh_fleche', 0)
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{iy+fleche} Q {ix+(iw/2)},{iy} {ix},{iy+fleche} z"
+        svg_list.append((z_dim, draw_dim(ix+iw/2, iy, ix+iw/2, iy+fleche, fleche, -40, "red", "F=")))
+        
+    elif "Forme D" in shape:
+        rx, ry = iw / 2, ih / 2
+        cx, cy = ix + rx, iy + ry
+        path_d = f"M {cx-rx},{cy} a {rx},{ry} 0 1,0 {2*rx},0 a {rx},{ry} 0 1,0 -{2*rx},0"
+        
+    else: # Default
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+
+    svg_list.append((z_glass, f'<path d="{path_d}" fill="{g_fill}" stroke="#888" stroke-width="2" />'))
+
+    # 5. Machining (Usinage)
+    if s.get('vit_usi_enable'):
+        # Trous
+        nb_t = s.get('vit_nb_trous', 0)
+        for i in range(nb_t):
+             tx = s.get(f"v_t_x_{i}", 0)
+             ty = s.get(f"v_t_y_{i}", 0)
+             td = s.get(f"v_t_d_{i}", 10)
+             # Draw Circle at ix+tx, iy+ty
+             cx, cy = ix + tx, iy + ty
+             svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
+             svg_list.append((z_pb, f'<text x="{cx}" y="{cy}" font-size="10" fill="red" text-anchor="middle" dy="3">Ø{td}</text>'))
+             # Dims Position Hole (Avoid Center)
+             svg_list.append((z_dim, draw_dim(ix, cy, cx, cy, tx, 80, "orange", "X", avoid_point=center_pt)))
+             svg_list.append((z_dim, draw_dim(cx, iy, cx, cy, ty, 80, "orange", "Y", avoid_point=center_pt))) 
+        
+        # Encoches
+        nb_e = s.get('vit_nb_enc', 0)
+        for i in range(nb_e):
+             ex = s.get(f"v_e_x_{i}", 0)
+             ey = s.get(f"v_e_y_{i}", 0)
+             ew = s.get(f"v_e_w_{i}", 50)
+             eh = s.get(f"v_e_h_{i}", 50)
+             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
+
+        # Mickey 101 (With Side Logic)
+        if s.get('vit_mickey_101'):
+            mickey_w, mickey_h = 165, 46
+            side = s.get('vit_mickey_side', 'Gauche')
+            
+            # Position Logic: Notch is FLUSH with edge (Width 165)
+            # Axis (Pivot) is at 65mm from the same edge.
+            
+            if side == "Gauche":
+                 p_start = ix # Flush Left
+                 p_end = ix + mickey_w # Extend Inwards
+                 mx = ix + 65 # Axis
+            else: # Droite
+                 p_start = ix + iw - mickey_w # Flush Right
+                 p_end = ix + iw
+                 mx = ix + iw - 65 # Axis
+            
+            # Draw Function for Notch
+            def draw_mickey(my, is_top):
+                 sign = 1 if is_top else -1
+                 d_path = f"M {p_start},{my} v {sign*mickey_h} h {mickey_w} v -{sign*mickey_h} z"
+                 # Cutout (White)
+                 svg_list.append((z_pb, f'<path d="{d_path}" fill="white" stroke="red" stroke-width="2" />'))
+                 
+                 # Holes Layout centered on Axis (mx)
+                 h1x = mx - 30 
+                 h2x = mx + 30
+                 hy = my + (sign * mickey_h * 0.5)
+                 
+                 svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
+                 svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
+                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle">Enc. 101</text>'))
+                 
+                 # Dim Width (Use Center Avoid)
+                 svg_list.append((z_dim, draw_dim(p_start, my + sign*10, p_end, my + sign*10, mickey_w, 20, "red", "", avoid_point=center_pt)))
+                 # Dim Axis (From Edge - Use Center Avoid)
+                 if side == "Gauche":
+                     # From ix to mx
+                     svg_list.append((z_dim, draw_dim(ix, my+sign*40, mx, my+sign*40, 65, 0, "red", "Axe=", avoid_point=center_pt)))
+                 else:
+                     # From ix+iw to mx
+                     svg_list.append((z_dim, draw_dim(ix+iw, my+sign*40, mx, my+sign*40, 65, 0, "red", "Axe=", avoid_point=center_pt)))
+
+            # Draw Top AND Bottom (User requirement)
+            draw_mickey(iy, True)
+            draw_mickey(iy + ih, False)
+             
+    # 5. Petits Bois
+    if s.get('vit_pb_enable'):
+        nb_h = s.get('vit_pb_hor', 0)
+        nb_v = s.get('vit_pb_vert', 0)
+        thick = s.get('vit_pb_thick', 26)
+        
+        if nb_h > 0:
+            step_h = ih / (nb_h + 1)
+            for i in range(nb_h):
+                py = iy + step_h * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
+
+        if nb_v > 0:
+            step_v = iw / (nb_v + 1)
+            for i in range(nb_v):
+                px = ix + step_v * (i + 1) - (thick/2)
+                svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
+
+    # 6. Cleanup Frame Dims if Glass Dims present (Blue/Red present -> Remove Grey)
+    if 'svg_list' in locals() and len(svg_list) > 0:
+         # Filter out any item containing stroke="#888" IF we have Blue/Red dims
+         has_fab_dims = any((item[0] == z_dim and ('blue' in item[1] or 'red' in item[1])) for item in svg_list)
+         if has_fab_dims:
+             svg_list = [item for item in svg_list if not (item[0] == z_dim and '#888' in item[1])]
+
+    # 7. Render
+    svg_list.sort(key=lambda x: x[0])
+    content = "".join([item[1] for item in svg_list])
+    
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
+    """Génère le dessin SVG Vitrage (Style Menuiserie V73) - V7 White + Axis Dims"""
+    s = st.session_state
+    
+    # 1. Setup Canvas
+    w_mm = s.get('vit_width', 1000)
+    h_mm = s.get('vit_height', 1000)
+    
     # Visual Params
     th_outer = 50
     th_inner = 40
@@ -4289,33 +5083,209 @@ def generate_svg_vitrage():
     svg_list = [] 
     z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
 
-    # 2. Draw Outer Frame (White)
-    ox, oy = x0 - th_outer, y0 - th_outer
-    ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
-    
-    svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
-    svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-    svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-    svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
-    svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+    # HELPER: Draw Dimension
+    def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
+        import math
+        d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+        if d == 0: return ""
+        ux, uy = (x2-x1)/d, (y2-y1)/d
+        nx, ny = -uy, ux # Initial Normal
+        
+        mx, my = (x1+x2)/2, (y1+y2)/2
+        
+        # Auto-Flip if avoid_point provided (Center of glass)
+        if avoid_point:
+            cx, cy = avoid_point
+            # Vector Center -> Midpoint
+            vx, vy = mx - cx, my - cy
+            # Dot product with Normal
+            dot = nx * vx + ny * vy
+            # If dot < 0, Normal points inwards (opposing V). We want it same direction as V (Outwards).
+            if dot < 0:
+                nx, ny = -nx, -ny
+                
+        # Apply Offset
+        ax, ay = x1 + nx*offset, y1 + ny*offset
+        bx, by = x2 + nx*offset, y2 + ny*offset
+        
+        mk_len = 10
+        out = ""
+        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
+        
+        # Ticks (Oriented with Normal now)
+        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
+        
+        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        
+        mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
+        txt_offset = 15
+        out += f'<text x="{mx_dim + nx*txt_offset}" y="{my_dim + ny*txt_offset}" fill="{color}" font-size="20" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}</text>'
+        return out
 
-    # 3. Draw Inner Frame (Dormant White)
-    # V8: Lighter Stroke (#AAA) as requested
-    col_stroke = "#AAA"
-    svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
+    # 2. Logic: Glass Only?
+    mat = s.get('vit_mat', '')
+    glass_only = (mat in ["Porte Sécurit", "Vitrage Seul"])
     
-    ix, iy = x0 + th_inner, y0 + th_inner
-    iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
-    svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
-    
-    svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-    svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-    svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
-    svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+    # 3. Define Draw Area
+    if glass_only:
+        # No Frame, Glass = Full Size
+        ix, iy = x0, y0
+        iw, ih = w_mm, h_mm
+        # Glass Dims
+        svg_list.append((z_dim, draw_dim(ix, iy, ix+iw, iy, iw, -40, "blue")))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, -40, "blue")))
+    else:
+        # Draw Frame (Standard)
+        ox, oy = x0 - th_outer, y0 - th_outer
+        ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
+        
+        svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
+        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
 
-    # 4. Glass
+        # Inner Frame
+        col_stroke = "#AAA"
+        svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
+        
+        ix, iy = x0 + th_inner, y0 + th_inner
+        iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
+        
+        svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
+        
+        # Frame Dims (Grey)
+        svg_list.append((z_dim, draw_dim(x0, y0-10, x0+w_mm, y0-10, w_mm, 30, "#888", "L ")))
+        svg_list.append((z_dim, draw_dim(x0-10, y0, x0-10, y0+h_mm, h_mm, 30, "#888", "H ")))
+
+    # 4. Glass & Shapes
     g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
-    svg_list.append((z_glass, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="{g_fill}" stroke="#888" stroke-width="1" />'))
+    shape = s.get('vit_shape', 'Rectangulaire')
+    path_d = ""
+    
+    # Center Point for Dimension Orientation (Avoid Point)
+    center_pt = (ix + iw/2, iy + ih/2)
+    
+    if shape == "Rectangulaire":
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+        # Explicit Blue Dims for Rectangle (Outside)
+        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+iw, iy+ih, iw, 80, "blue", "", avoid_point=center_pt)))
+        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, 80, "blue", "", avoid_point=center_pt)))
+    elif "Forme A1" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        y_tl, y_tr = (iy + ih) - h1, (iy + ih) - h2
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_tr} L {ix},{y_tl} z"
+        svg_list.append((z_dim, draw_dim(ix-20, iy+ih, ix-20, y_tl, h1, 80, "red", "H1=")))
+        svg_list.append((z_dim, draw_dim(ix+iw+20, iy+ih, ix+iw+20, y_tr, h2, 80, "red", "H2=")))
+    elif "Forme A2" in shape: # Pan Coupé
+        lx, ly = s.get('vit_sh_lc', 200), s.get('vit_sh_hc', 200)
+        path_d = f"M {ix},{iy} L {ix+iw-lx},{iy} L {ix+iw},{iy+ly} L {ix+iw},{iy+ih} L {ix},{iy+ih} z"
+        svg_list.append((z_dim, draw_dim(ix+iw-lx, iy-10, ix+iw, iy-10, lx, 80, "red", "Lx=")))
+        svg_list.append((z_dim, draw_dim(ix+iw+10, iy, ix+iw+10, iy+ly, ly, 80, "red", "Ly=")))
+    elif "Forme B" in shape:
+        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
+        h3 = s.get('vit_sh_h3', ih)
+        l1 = s.get('vit_sh_l1', iw/2)
+        l2 = s.get('vit_sh_l2', 0)
+        
+        y_l, y_r = (iy + ih) - h1, (iy + ih) - h2
+        y_peak = (iy + ih) - h3
+        
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_r} L {ix+l1+l2},{y_peak} L {ix+l1},{y_peak} L {ix},{y_l} z"
+        
+        svg_list.append((z_dim, draw_dim(ix-20, iy+ih, ix-20, y_l, h1, 80, "red", "H1=")))
+        svg_list.append((z_dim, draw_dim(ix+iw+20, iy+ih, ix+iw+20, y_r, h2, 80, "red", "H2=")))
+        svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1, y_peak, h3, 0, "red", "H3="))) # Center
+        svg_list.append((z_dim, draw_dim(ix, iy+ih+40, ix+l1, iy+ih+40, l1, 40, "red", "L1=")))
+        if l2 > 0:
+             svg_list.append((z_dim, draw_dim(ix+l1, iy+ih+40, ix+l1+l2, iy+ih+40, l2, 40, "red", "L2=")))
+    elif "Forme C" in shape:
+        fleche = s.get('vit_sh_fleche', 0)
+        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{iy+fleche} Q {ix+(iw/2)},{iy} {ix},{iy+fleche} z"
+        svg_list.append((z_dim, draw_dim(ix+iw/2, iy, ix+iw/2, iy+fleche, fleche, -40, "red", "F=")))
+    elif "Forme D" in shape:
+        rx, ry = iw / 2, ih / 2
+        cx, cy = ix + rx, iy + ry
+        path_d = f"M {cx-rx},{cy} a {rx},{ry} 0 1,0 {2*rx},0 a {rx},{ry} 0 1,0 -{2*rx},0"
+    else: # Default
+        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
+
+    svg_list.append((z_glass, f'<path d="{path_d}" fill="{g_fill}" stroke="#888" stroke-width="2" />'))
+
+    # 5. Machining (Usinage)
+    if s.get('vit_usi_enable'):
+        # Trous
+        nb_t = s.get('vit_nb_trous', 0)
+        for i in range(nb_t):
+             tx = s.get(f"v_t_x_{i}", 0)
+             ty = s.get(f"v_t_y_{i}", 0)
+             td = s.get(f"v_t_d_{i}", 10)
+             # Draw Circle at ix+tx, iy+ty
+             cx, cy = ix + tx, iy + ty
+             svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
+             svg_list.append((z_pb, f'<text x="{cx}" y="{cy}" font-size="10" fill="red" text-anchor="middle" dy="3">Ø{td}</text>'))
+             # Dims Position Hole (Avoid Center)
+             svg_list.append((z_dim, draw_dim(ix, cy, cx, cy, tx, 80, "orange", "X", avoid_point=center_pt)))
+             svg_list.append((z_dim, draw_dim(cx, iy, cx, cy, ty, 80, "orange", "Y", avoid_point=center_pt))) 
+        
+        # Encoches
+        nb_e = s.get('vit_nb_enc', 0)
+        for i in range(nb_e):
+             ex = s.get(f"v_e_x_{i}", 0)
+             ey = s.get(f"v_e_y_{i}", 0)
+             ew = s.get(f"v_e_w_{i}", 50)
+             eh = s.get(f"v_e_h_{i}", 50)
+             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
+
+        # Mickey 101 (With Side Logic)
+        mickey_w, mickey_h = 165, 46
+        # hole_offset = 65 # Unused, we align axis
+        side = s.get('vit_mickey_side', 'Gauche')
+        
+        # Axis Position (Pivot Axis)
+        if side == "Gauche":
+             mx = ix + 65
+        else: # Droite
+             mx = ix + iw - 65
+        
+        # Draw Function for Notch
+        def draw_mickey(my, is_top):
+             # Draw Notch Centered on Axis
+             p_start = mx - (mickey_w / 2)
+             p_end = mx + (mickey_w / 2)
+             
+             sign = 1 if is_top else -1
+             d_path = f"M {p_start},{my} v {sign*mickey_h} h {mickey_w} v -{sign*mickey_h} z"
+             
+             svg_list.append((z_pb, f'<path d="{d_path}" fill="white" stroke="red" stroke-width="2" />'))
+             
+             # Holes Layout centered on mx
+             h1x = mx - 30 
+             h2x = mx + 30
+             hy = my + (sign * mickey_h * 0.5)
+             
+             svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
+             svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
+             svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle">Enc. 101</text>'))
+             
+             svg_list.append((z_dim, draw_dim(p_start, my + sign*10, p_end, my + sign*10, mickey_w, 20, "red", "", avoid_point=center_pt)))
+
+        if s.get('vit_mickey_haut'):
+             draw_mickey(iy, True)
+
+        if s.get('vit_mickey_bas'):
+             draw_mickey(iy + ih, False)
+             
+    # 6. Cleanup Frame Dims if Shape Dims present (Blue/Red present -> Remove Grey)
+    if 'svg_list' in locals() and len(svg_list) > 0:
+         svg_list = [item for item in svg_list if not (item[0] == z_dim and 'stroke="#888"' in item[1])]
+
     
     # 5. Petits Bois
     if s.get('vit_pb_enable'):
@@ -4366,6 +5336,11 @@ def generate_svg_vitrage():
         int(h_mm), 
         "", 180, "V", 32, z_dim, leader_fixed_start=axis_left)
     
+    # 6. Cleanup Frame Dims if Shape Dims present (Blue/Red present -> Remove Grey)
+    if shape != "Rectangulaire":
+         # Remove generic dims (z_dim items with #888 stroke)
+         svg_list = [item for item in svg_list if not (item[0] == z_dim and 'stroke="#888"' in item[1])]
+
     # 7. Render
     svg_list.sort(key=lambda x: x[0])
     content = "".join([item[1] for item in svg_list])
