@@ -250,49 +250,51 @@ def render_html_menuiserie(s, svg_string, logo_b64):
     
     # Common Factorization Logic (For Print)
     # V75 FIX: Only factorize if multiple zones. If 1 zone, show details in Zone section.
+    def get_vit(zparams):
+         # V12 ROBUSTNESS: Reconstruct if missing
+         res = zparams.get('vitrage_resume', '')
+         if not res or res == "None":
+             # Try to reconstruct from components
+             if 'vitrage_ext_ep' in zparams:
+                 # V11 Logic Reconstruction
+                 try:
+                     ep_e = str(zparams.get('vitrage_ext_ep','4')).replace(' mm', '')
+                     ep_i = str(zparams.get('vitrage_int_ep','4')).replace(' mm', '')
+                     # Handle "Vide Air" key variation (vide_air_ep vs vit_ep_air)
+                     ep_a = str(zparams.get('vide_air_ep', zparams.get('vit_ep_air', '16'))).replace(' mm', '')
+                     
+                     c_e = zparams.get('vitrage_ext_couche','Aucune')
+                     c_i = zparams.get('vitrage_int_couche','Aucune')
+                     
+                     sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
+                     sf_i = "FE" if "FE" in c_i else ""
+                     
+                     ty_e = zparams.get('vitrage_ext_type','Clair')
+                     st_e = f" {ty_e}" if ty_e != "Clair" else ""
+                     
+                     ty_i = zparams.get('vitrage_int_type','Clair')
+                     st_i = f" {ty_i}" if ty_i != "Clair" else ""
+                     
+                     gaz = zparams.get('vit_gaz','Argon').upper() # Default to Argon if missing
+                     inter = str(zparams.get('intercalaire_type','Alu')).upper()
+                     
+                     res = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
+                 except:
+                     res = "-"
+             else:
+                 res = "-"
+         return str(res).replace('\n', ' ')
+
+    def get_grille(zparams): return zparams.get('pos_grille', 'Aucune')
+
     common_specs = {}
     if sorted_zones and len(sorted_zones) > 1:
          first_type = sorted_zones[0]['type']
          if all(z['type'] == first_type for z in sorted_zones): common_specs['Type'] = first_type
          
-         def get_vit(zparams):
-             # V12 ROBUSTNESS: Reconstruct if missing
-             res = zparams.get('vitrage_resume', '')
-             if not res or res == "None":
-                 # Try to reconstruct from components
-                 if 'vitrage_ext_ep' in zparams:
-                     # V11 Logic Reconstruction
-                     try:
-                         ep_e = str(zparams.get('vitrage_ext_ep','4')).replace(' mm', '')
-                         ep_i = str(zparams.get('vitrage_int_ep','4')).replace(' mm', '')
-                         # Handle "Vide Air" key variation (vide_air_ep vs vit_ep_air)
-                         ep_a = str(zparams.get('vide_air_ep', zparams.get('vit_ep_air', '16'))).replace(' mm', '')
-                         
-                         c_e = zparams.get('vitrage_ext_couche','Aucune')
-                         c_i = zparams.get('vitrage_int_couche','Aucune')
-                         
-                         sf_e = "FE" if "FE" in c_e else (" CS" if "Contrôle" in c_e else "")
-                         sf_i = "FE" if "FE" in c_i else ""
-                         
-                         ty_e = zparams.get('vitrage_ext_type','Clair')
-                         st_e = f" {ty_e}" if ty_e != "Clair" else ""
-                         
-                         ty_i = zparams.get('vitrage_int_type','Clair')
-                         st_i = f" {ty_i}" if ty_i != "Clair" else ""
-                         
-                         gaz = zparams.get('vit_gaz','Argon').upper() # Default to Argon if missing
-                         inter = str(zparams.get('intercalaire_type','Alu')).upper()
-                         
-                         res = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
-                     except:
-                         res = "-"
-                 else:
-                     res = "-"
-             return str(res).replace('\n', ' ')
          first_vit = get_vit(sorted_zones[0]['params'])
          if all(get_vit(z['params']) == first_vit for z in sorted_zones): common_specs['Vitrage'] = first_vit
          
-         def get_grille(zparams): return zparams.get('pos_grille', 'Aucune')
          first_grille = get_grille(sorted_zones[0]['params'])
          if all(get_grille(z['params']) == first_grille for z in sorted_zones): 
              if first_grille != "Aucune": common_specs['Ventilation'] = first_grille
@@ -507,6 +509,7 @@ ARTIFACT_DIR = os.path.join(current_dir, "assets")
 
 def init_project_state():
     """Initialise l'état du projet s'il n'existe pas."""
+    if 'project' not in st.session_state:
         st.session_state['project'] = {
             "name": "Nouveau Projet",
             "configs": [] # List of dicts: {id, ref, data}
