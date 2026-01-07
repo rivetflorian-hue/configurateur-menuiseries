@@ -249,8 +249,9 @@ def render_html_menuiserie(s, svg_string, logo_b64):
     sorted_zones = sorted(real, key=lambda z: (z['y'], z['x']))
     
     # Common Factorization Logic (For Print)
+    # V75 FIX: Only factorize if multiple zones. If 1 zone, show details in Zone section.
     common_specs = {}
-    if sorted_zones:
+    if sorted_zones and len(sorted_zones) > 1:
          first_type = sorted_zones[0]['type']
          if all(z['type'] == first_type for z in sorted_zones): common_specs['Type'] = first_type
          
@@ -415,13 +416,11 @@ def render_html_menuiserie(s, svg_string, logo_b64):
             </div>
             
             <!-- OBSERVATIONS -->
-            <!-- OBSERVATIONS -->
             {obs_men_html}
             
             <div class="footer">
                 Document généré automatiquement - Miroiterie Yerroise<br>
-                Merci de vérifier les cotes avant validation définitive.<br>
-                <span style="color:red; font-size:8px;">DEBUG: men_obs='{s.get('men_obs', 'None')}' keys={list(s.keys())}</span>
+                Merci de vérifier les cotes avant validation définitive.
             </div>
         </div>
     </body>
@@ -508,11 +507,14 @@ ARTIFACT_DIR = os.path.join(current_dir, "assets")
 
 def init_project_state():
     """Initialise l'état du projet s'il n'existe pas."""
-    if 'project' not in st.session_state:
         st.session_state['project'] = {
             "name": "Nouveau Projet",
             "configs": [] # List of dicts: {id, ref, data}
         }
+        
+    # Fix for missing observations on fresh reload
+    if 'men_obs' not in st.session_state:
+        st.session_state['men_obs'] = ""
     
     # Ensure mode_module exists immediately
     if 'mode_module' not in st.session_state:
@@ -532,7 +534,8 @@ def serialize_config():
         'proj_type', 'pose_type', 'fin_val', 'same_bot', 'fin_bot',
         'is_appui_rap', 'width_appui', 'col_in', 'col_ex',
         'width_dorm', 'height_dorm', 'h_allege',
-        'vr_enable', 'vr_h', 'vr_g', 'struct_mode', 'zone_tree'
+        'vr_enable', 'vr_h', 'vr_g', 'struct_mode', 'zone_tree',
+        'men_obs'
     ]
     
     data = {}
@@ -4381,7 +4384,28 @@ def generate_svg_vitrage():
     # 0: BG, 10: Frame, 20: Glass, 30: Petit Bois/Usi, 40: Dims
     z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
 
-    # HELPER: Draw Dimension (Local helper for SHAPES)
+    # HELPER: Smart Offset based on Value (Legacy - Removed in favor of Rank System)
+    # def get_dim_offset(val): ... 
+
+    # SMART DIMENSION SYSTEM v1
+    # Buckets to collect dimensions per edge
+    dim_buckets = {
+        "bottom": [], # (val, x1, y1, x2, y2, color, label, avoid_pt)
+        "top": [],
+        "left": [],
+        "right": []
+    }
+
+    def add_smart_dim(edge, val, x1, y1, x2, y2, color="blue", label="", avoid_pt=None):
+        dim_buckets[edge].append({
+            "val": val, 
+            "pts": (x1, y1, x2, y2),
+            "color": color,
+            "label": label,
+            "avoid": avoid_pt
+        })
+
+    # HELPER: Draw Dimension (Low Level)
     def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
         import math
         d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
@@ -4430,8 +4454,8 @@ def generate_svg_vitrage():
         suffix = ""
         if "Axe" in label_prefix: suffix = " mm"
         
-        # Simple Text (No Halo)
-        out += f'<text x="{tx}" y="{ty}" fill="{color}" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}{suffix}</text>'
+        # Simple Text (No Halo) -> With Halo
+        out += f'<text x="{tx}" y="{ty}" fill="{color}" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})" paint-order="stroke" stroke="white" stroke-width="3">{label_prefix}{val:.0f}{suffix}</text>'
         return out
 
     # 2. Logic: Glass Only?
@@ -4562,40 +4586,37 @@ def generate_svg_vitrage():
                  cx = ix + tx
                  cy = (iy + ih) - ty
                  # Dim X (Bottom)
-                 svg_list.append((z_dim, draw_dim(ix, iy+ih, cx, iy+ih, tx, 80, "orange", "X")))
-                 # Dim Y (Left) - Corrected: Offset -80 (Left)
-                 svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, cy, ty, -80, "orange", "Y")))
+                 add_smart_dim("bottom", tx, ix, iy+ih, cx, iy+ih, "orange", "X", None)
+                 # Dim Y (Left)
+                 add_smart_dim("left", ty, ix, iy+ih, ix, cy, "orange", "Y", None)
                  
              elif "3" in ref: # Haut Droite
                  cx = (ix + iw) - tx
                  cy = iy + ty
-                 # Dim X (Top) - Corrected: Offset +80 (Up) relative to Reverse Vector?
-                 # Vector (-1,0). Normal (0,-1) [Up]. Offset +80 -> Up.
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy, cx, iy, tx, 80, "orange", "X")))
-                 # Dim Y (Right) - Corrected: Offset -80 (Right) relative to Left Normal?
-                 # Vector (0,1). Normal (-1,0) [Left]. Offset -80 -> Right. Correct.
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, cy, ty, -80, "orange", "Y")))
+                 # Dim X (Top)
+                 add_smart_dim("top", tx, ix+iw, iy, cx, iy, "orange", "X", None)
+                 # Dim Y (Right)
+                 add_smart_dim("right", ty, ix+iw, iy, ix+iw, cy, "orange", "Y", None)
                  
              elif "4" in ref: # Bas Droite
                  cx = (ix + iw) - tx
                  cy = (iy + ih) - ty
                  # Dim X (Bottom)
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, cx, iy+ih, tx, -80, "orange", "X")))
-                 # Dim Y (Right) - Corrected: Offset +80 (Right) relative to Right Normal?
-                 # Vector (0,-1). Normal (1,0) [Right]. Offset +80 -> Right. Correct.
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, cy, ty, 80, "orange", "Y")))
+                 add_smart_dim("bottom", tx, ix+iw, iy+ih, cx, iy+ih, "orange", "X", None)
+                 # Dim Y (Right)
+                 add_smart_dim("right", ty, ix+iw, iy+ih, ix+iw, cy, "orange", "Y", None)
                  
              else: # 2 or Default (Haut Gauche)
                  cx = ix + tx
                  cy = iy + ty
                  # Dim X (Top)
-                 svg_list.append((z_dim, draw_dim(ix, iy, cx, iy, tx, -80, "orange", "X")))
+                 add_smart_dim("top", tx, ix, iy, cx, iy, "orange", "X", None)
                  # Dim Y (Left)
-                 svg_list.append((z_dim, draw_dim(ix, iy, ix, cy, ty, 80, "orange", "Y")))
+                 add_smart_dim("left", ty, ix, iy, ix, cy, "orange", "Y", None)
 
              svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
-             # V16 Polish: Label Outside & Bigger
-             svg_list.append((z_pb, f'<text x="{cx}" y="{cy - (td/2) - 15}" font-size="16" fill="red" text-anchor="middle">Ø{td}</text>'))
+             # V16 Polish: Label Outside & Bigger (Font 20)
+             svg_list.append((z_pb, f'<text x="{cx}" y="{cy - (td/2) - 15}" font-size="20" font-weight="bold" fill="red" text-anchor="middle">Ø{td}</text>'))
         
         # Encoches
         nb_e = s.get('vit_nb_enc', 0)
@@ -4612,44 +4633,43 @@ def generate_svg_vitrage():
              
              if "1" in ref: # Bas Gauche (X from Left, Y from Bottom)
                  nx = ix + ex
-                 ny = (iy + ih) - ey - eh # Top of Notch = Bottom - dist - height
+                 ny = (iy + ih) - ey - eh
                  # Dim X (Bottom)
-                 svg_list.append((z_dim, draw_dim(ix, iy+ih, nx, iy+ih, ex, 80, "red", "X", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(nx, iy+ih, nx+ew, iy+ih, ew, 80, "red", "L", avoid_point=None)))
-                 # Dim Y (Left). - Corrected: Offset -80 (Left)
-                 svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, iy+ih-ey, ey, -80, "red", "Y", avoid_point=None)))
-                 # Height - Corrected: Offset -80 (Left)
-                 svg_list.append((z_dim, draw_dim(ix, iy+ih-ey, ix, ny, eh, -80, "red", "H", avoid_point=None)))
+                 add_smart_dim("bottom", ex, ix, iy+ih, nx, iy+ih, "purple", "X", None)
+                 add_smart_dim("bottom", ew, nx, iy+ih, nx+ew, iy+ih, "purple", "L", None)
+                 # Dim Y (Left) - Target LEFT edge
+                 add_smart_dim("left", ey, ix, iy+ih, ix, iy+ih-ey, "purple", "Y", None)
+                 add_smart_dim("left", eh, ix, iy+ih-ey, ix, ny, "purple", "H", None)
 
              elif "3" in ref: # Haut Droite
                  nx = (ix + iw) - ex - ew
                  ny = iy + ey
-                 # Dim X (Top) - Corrected: Offset +80 (Up)
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw-ex, iy, ex, 80, "red", "X", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(ix+iw-ex, iy, nx, iy, ew, 80, "red", "L", avoid_point=None)))
+                 # Dim X (Top)
+                 add_smart_dim("top", ex, ix+iw, iy, ix+iw-ex, iy, "purple", "X", None)
+                 add_smart_dim("top", ew, ix+iw-ex, iy, nx, iy, "purple", "L", None)
                  # Dim Y (Right)
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, ny, ey, -80, "red", "Y", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(ix+iw, ny, ix+iw, ny+eh, eh, -80, "red", "H", avoid_point=None)))
+                 add_smart_dim("right", ey, ix+iw, iy, ix+iw, ny, "purple", "Y", None)
+                 add_smart_dim("right", eh, ix+iw, ny, ix+iw, ny+eh, "purple", "H", None)
                  
              elif "4" in ref: # Bas Droite
                  nx = (ix + iw) - ex - ew
                  ny = (iy + ih) - ey - eh
                  # Dim X (Bottom)
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw-ex, iy+ih, ex, -80, "red", "X", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(ix+iw-ex, iy+ih, nx, iy+ih, ew, -80, "red", "L", avoid_point=None)))
-                 # Dim Y (Right) - Corrected: Offset +80 (Right)
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, iy+ih-ey, ey, 80, "red", "Y", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(ix+iw, iy+ih-ey, ix+iw, ny, eh, 80, "red", "H", avoid_point=None)))
+                 add_smart_dim("bottom", ex, ix+iw, iy+ih, ix+iw-ex, iy+ih, "purple", "X", None)
+                 add_smart_dim("bottom", ew, ix+iw-ex, iy+ih, nx, iy+ih, "purple", "L", None)
+                 # Dim Y (Right)
+                 add_smart_dim("right", ey, ix+iw, iy+ih, ix+iw, iy+ih-ey, "purple", "Y", None)
+                 add_smart_dim("right", eh, ix+iw, iy+ih-ey, ix+iw, ny, "purple", "H", None)
              
              else: # 2 (Haut Gauche)
                  nx = ix + ex
                  ny = iy + ey
                  # Dim X (Top)
-                 svg_list.append((z_dim, draw_dim(ix, iy, nx, iy, ex, -80, "red", "X", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(nx, iy, nx+ew, iy, ew, -80, "red", "L", avoid_point=None)))
+                 add_smart_dim("top", ex, ix, iy, nx, iy, "purple", "X", None)
+                 add_smart_dim("top", ew, nx, iy, nx+ew, iy, "purple", "L", None)
                  # Dim Y (Left)
-                 svg_list.append((z_dim, draw_dim(ix, iy, ix, ny, ey, 80, "red", "Y", avoid_point=None)))
-                 svg_list.append((z_dim, draw_dim(ix, ny, ix, ny+eh, eh, 80, "red", "H", avoid_point=None)))
+                 add_smart_dim("left", ey, ix, iy, ix, ny, "purple", "Y", None)
+                 add_smart_dim("left", eh, ix, ny, ix, ny+eh, "purple", "H", None)
 
              # V16 Polish: White Fill (Removed Glass)
              svg_list.append((z_pb, f'<rect x="{nx}" y="{ny}" width="{ew}" height="{eh}" fill="white" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
@@ -4708,20 +4728,21 @@ def generate_svg_vitrage():
                  svg_list.append((z_pb, f'<line x1="{x_axis}" y1="{ay_out}" x2="{x_axis}" y2="{ay_in}" stroke="red" stroke-width="1.5" stroke-dasharray="10,4,2,4" />'))
                  
                  # DIMENSIONS (Strictly OUTSIDE Glass & Spaced Out)
-                 # Text is pushed 40px OUT from Line.
-                 # 1. Width Line at 30mm -> Text at 70mm
-                 y_dim_w = my - (sign * 30)
-                 svg_list.append((z_dim, draw_dim(p_start, y_dim_w, p_end, y_dim_w, mickey_w, 20, "red", "", avoid_point=center_pt)))
+                 # Rule: Smallest First (Closest), Largest Last (Furthest)
                  
-                 # 2. Axis Line at 95mm
-                 y_dim_axis = my - (sign * 95)
+                 # 1. Axis Line (Smart Offset)
+                 # 1. Axis Line (Smart Buckets)
                  if side == "Gauche":
-                     svg_list.append((z_dim, draw_dim(ix, y_dim_axis, x_axis, y_dim_axis, 65, 0, "red", "Axe carré = ", avoid_point=center_pt)))
+                     # From ix to mx (Axis)
+                     add_smart_dim("bottom", 65, ix, my-sign*20, mx, my-sign*20, "red", "Axe carré = ", center_pt)
                  else:
-                     svg_list.append((z_dim, draw_dim(ix+iw, y_dim_axis, x_axis, y_dim_axis, 65, 0, "red", "Axe carré = ", avoid_point=center_pt)))
+                     add_smart_dim("bottom", 65, ix+iw, my-sign*20, mx, my-sign*20, "red", "Axe carré = ", center_pt)
+                 
+                 # 2. Label Encoche (Fixed at 75 - Outside Notch)
+                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*75}" font-size="20" font-weight="bold" fill="red" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="white" stroke-width="3">Enc. 101</text>'))
 
-                 # 3. Label Encoche (On Blue Zone per Request)
-                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text_anchor="middle" dominant-baseline="middle">Enc. 101</text>'))
+                 # 3. Width Line (Smart Buckets)
+                 add_smart_dim("bottom", mickey_w, p_start, my-sign*20, p_end, my-sign*20, "red", "", center_pt)
 
             # Draw Top AND Bottom
             draw_mickey(iy, True)
@@ -4770,16 +4791,83 @@ def generate_svg_vitrage():
         axis_left, axis_bottom, 
         axis_right, axis_bottom, 
         int(w_mm), 
-        "", 160, "H", 32, z_dim, leader_fixed_start=axis_bottom)
+        "", 250, "H", 32, z_dim, leader_fixed_start=axis_bottom)
     
     # Height (Global)
     draw_dimension_line(svg_list, 
         axis_left, axis_top, 
         axis_left, axis_bottom, 
         int(h_mm), 
-        "", 180, "V", 32, z_dim, leader_fixed_start=axis_left)
+        "", 250, "V", 32, z_dim, leader_fixed_start=axis_left)
     
     # NO Cleanup of these dims. User wants them.
+
+    # 6.5 Render Smart Dims
+    # Process Buckets
+    
+    # Config: Base distance + Step
+    # Config: Base distance + Step
+    base_dist = 40 # Reduced to 40 to "glue" small dims (User Request)
+    step_dist = 40 # Reduced step
+    
+    # Helper to process a bucket
+    def render_bucket(edge_name, bucket_list, sign_direction):
+        if not bucket_list: return
+        
+        # 1. Unique Values & Sort
+        # Force Float conversion for correct numerical sorting
+        try:
+            vals = []
+            for b in bucket_list:
+                try:
+                    vals.append(float(b['val']))
+                except:
+                    pass
+            unique_vals = sorted(list(set(vals)))
+        except:
+             unique_vals = sorted(list(set([b['val'] for b in bucket_list])))
+        
+        # 2. Assign Rank Map
+        val_rank = {v: i for i, v in enumerate(unique_vals)}
+        
+        # 3. Draw
+        for item in bucket_list:
+            v_orig = item['val']
+            # Try to match float key
+            try:
+                v = float(v_orig)
+            except:
+                v = v_orig
+            
+            rank = val_rank.get(v, len(unique_vals)) # Default to end if missing
+            pts = item['pts']
+            
+            # NORMALIZE VECTORS for Consistent Normals
+            # Horizontal: Left -> Right (Normal Down)
+            # Vertical: Bottom -> Top (Normal Right)
+            x1, y1, x2, y2 = pts
+            
+            # Check Vertical (approx equal X)
+            if abs(x1 - x2) < 0.1:
+                # Force Bottom -> Top (y1 > y2)
+                if y1 < y2:
+                    x1, y1, x2, y2 = x2, y2, x1, y1
+            else:
+                # Force Left -> Right (x1 < x2)
+                if x1 > x2:
+                    x1, y1, x2, y2 = x2, y2, x1, y1
+            
+            # Calculate Offset
+            scalar_off = (base_dist + (rank * step_dist))
+            final_off = scalar_off * sign_direction
+            
+            svg_list.append((z_dim, draw_dim(x1, y1, x2, y2, v, final_off, item['color'], item['label'], item['avoid'])))
+
+    # Multipliers for Standardized Vectors [H: L->R (Normal Down)] [V: B->T (Normal Right)]
+    render_bucket("bottom", dim_buckets["bottom"], 1)   # Down (Out)
+    render_bucket("top", dim_buckets["top"], -1)        # Up (Out)
+    render_bucket("left", dim_buckets["left"], -1)      # Left (Out)
+    render_bucket("right", dim_buckets["right"], 1)     # Right (Out)
 
     # 7. Render
     svg_list.sort(key=lambda x: x[0])
@@ -4970,9 +5058,11 @@ def generate_svg_vitrage():
              cx, cy = ix + tx, iy + ty
              svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
              svg_list.append((z_pb, f'<text x="{cx}" y="{cy}" font-size="10" fill="red" text-anchor="middle" dy="3">Ø{td}</text>'))
-             # Dims Position Hole (Avoid Center)
-             svg_list.append((z_dim, draw_dim(ix, cy, cx, cy, tx, 80, "orange", "X", avoid_point=center_pt)))
-             svg_list.append((z_dim, draw_dim(cx, iy, cx, cy, ty, 80, "orange", "Y", avoid_point=center_pt))) 
+             # Dims Trous (Bucket) - X is Bottom, Y is Left in standard view
+             # BUT: Holes can be anywhere. We map X to bottom/top based on position? 
+             # For robustness, we assume X=Bottom, Y=Left usually.
+             add_smart_dim("bottom", tx, ix, cy, cx, cy, "orange", "X", center_pt)
+             add_smart_dim("left", ty, cx, iy, cx, cy, "orange", "Y", center_pt) 
         
         # Encoches
         nb_e = s.get('vit_nb_enc', 0)
@@ -5014,17 +5104,20 @@ def generate_svg_vitrage():
                  
                  svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
                  svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle">Enc. 101</text>'))
+                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text_anchor="middle" paint-order="stroke" stroke="white" stroke-width="3">Enc. 101</text>'))
                  
-                 # Dim Width (Use Center Avoid)
-                 svg_list.append((z_dim, draw_dim(p_start, my + sign*10, p_end, my + sign*10, mickey_w, 20, "red", "", avoid_point=center_pt)))
-                 # Dim Axis (From Edge - Use Center Avoid)
+                 # Dim Axis (Smart)
+                 # Dim Axis (Smart Buckets)
+                 edge_axis = "bottom" if not is_top else "top"
+                 
                  if side == "Gauche":
                      # From ix to mx
-                     svg_list.append((z_dim, draw_dim(ix, my+sign*40, mx, my+sign*40, 65, 0, "red", "Axe=", avoid_point=center_pt)))
+                     add_smart_dim(edge_axis, 65, ix, my, mx, my, "red", "Axe=", center_pt)
                  else:
-                     # From ix+iw to mx
-                     svg_list.append((z_dim, draw_dim(ix+iw, my+sign*40, mx, my+sign*40, 65, 0, "red", "Axe=", avoid_point=center_pt)))
+                     add_smart_dim(edge_axis, 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
+
+                 # Dim Width (Smart Buckets)
+                 add_smart_dim(edge_axis, mickey_w, p_start, my, p_end, my, "red", "", center_pt)
 
             # Draw Top AND Bottom (User requirement)
             draw_mickey(iy, True)
@@ -5071,7 +5164,7 @@ def generate_svg_vitrage():
     th_outer = 50
     th_inner = 40
     
-    margin = 250   # Marge large +
+    margin = 500   # Margins increased to accommodate largEST offsets (was 350)
     offset_top = 50
     
     vb_w = w_mm + (margin * 2.5) 
@@ -5241,7 +5334,18 @@ def generate_svg_vitrage():
              ey = s.get(f"v_e_y_{i}", 0)
              ew = s.get(f"v_e_w_{i}", 50)
              eh = s.get(f"v_e_h_{i}", 50)
-             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
+             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="purple" stroke-width="1" stroke-dasharray="4" />'))
+             # Dims for Standard Notches (Smart Buckets) - VIOLET
+             
+             # X Position (ix to ix+ex)
+             add_smart_dim("bottom", ex, ix, iy+ih, ix+ex, iy+ih, "purple", "X", center_pt)
+             # Width (ix+ex to ix+ex+ew)
+             add_smart_dim("bottom", ew, ix+ex, iy+ih, ix+ex+ew, iy+ih, "purple", "L", center_pt)
+             
+             # Y Position 
+             add_smart_dim("left", ey, ix, iy, ix, iy+ey, "purple", "Y", center_pt)
+             # Height
+             add_smart_dim("left", eh, ix, iy+ey, ix, iy+ey+eh, "purple", "H", center_pt)
 
         # Mickey 101 (With Side Logic)
         mickey_w, mickey_h = 165, 46
@@ -5272,9 +5376,29 @@ def generate_svg_vitrage():
              
              svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
              svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-             svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle">Enc. 101</text>'))
+             svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle" paint-order="stroke" stroke="white" stroke-width="3">Enc. 101</text>'))
+              
+             # Axis (Smart Buckets)
+             edge_axis = "bottom" if not is_top else "top"
              
-             svg_list.append((z_dim, draw_dim(p_start, my + sign*10, p_end, my + sign*10, mickey_w, 20, "red", "", avoid_point=center_pt)))
+             if side == "Gauche":
+                 # From ix to mx (Axis)
+                 if not is_top: # Bottom Edge
+                     add_smart_dim("bottom", 65, ix, my, mx, my, "red", "Axe=", center_pt)
+                 else:
+                     add_smart_dim("top", 65, ix, my, mx, my, "red", "Axe=", center_pt)
+             else:
+                 # From ix+iw to mx
+                 if not is_top:
+                     add_smart_dim("bottom", 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
+                 else:
+                     add_smart_dim("top", 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
+
+             # Width (Smart Buckets)
+             if not is_top:
+                 add_smart_dim("bottom", mickey_w, p_start, my, p_end, my, "red", "", center_pt)
+             else:
+                 add_smart_dim("top", mickey_w, p_start, my, p_end, my, "red", "", center_pt)
 
         if s.get('vit_mickey_haut'):
              draw_mickey(iy, True)
@@ -5283,7 +5407,8 @@ def generate_svg_vitrage():
              draw_mickey(iy + ih, False)
              
     # 6. Cleanup Frame Dims if Shape Dims present (Blue/Red present -> Remove Grey)
-    if 'svg_list' in locals() and len(svg_list) > 0:
+    if shape != "Rectangulaire":
+         # Remove generic dims (z_dim items with #888 stroke)
          svg_list = [item for item in svg_list if not (item[0] == z_dim and 'stroke="#888"' in item[1])]
 
     
@@ -5327,19 +5452,77 @@ def generate_svg_vitrage():
         axis_left, axis_bottom, 
         axis_right, axis_bottom, 
         int(w_mm), 
-        "", 160, "H", 32, z_dim, leader_fixed_start=axis_bottom)
+        "", 300, "H", 32, z_dim, leader_fixed_start=axis_bottom)
     
     # Height (LEFT SIDE) - Show Global Height but anchor leaders to Axis
     draw_dimension_line(svg_list, 
         axis_left, axis_top, 
         axis_left, axis_bottom, 
         int(h_mm), 
-        "", 180, "V", 32, z_dim, leader_fixed_start=axis_left)
+        "", 320, "V", 32, z_dim, leader_fixed_start=axis_left)
     
-    # 6. Cleanup Frame Dims if Shape Dims present (Blue/Red present -> Remove Grey)
-    if shape != "Rectangulaire":
-         # Remove generic dims (z_dim items with #888 stroke)
-         svg_list = [item for item in svg_list if not (item[0] == z_dim and 'stroke="#888"' in item[1])]
+    # 6.5 Render Smart Dims
+    # Process Buckets
+    
+    # Config: Base distance + Step
+    # Config: Base distance + Step
+    base_dist = 40
+    step_dist = 40
+    
+    # Helper to process a bucket
+    def render_bucket(edge_name, bucket_list, sign_direction):
+        if not bucket_list: return
+        
+        # 1. Unique Values & Sort
+        try:
+             vals = []
+             for b in bucket_list:
+                 try:
+                     vals.append(float(b['val']))
+                 except:
+                     pass
+             unique_vals = sorted(list(set(vals)))
+        except:
+             unique_vals = sorted(list(set([b['val'] for b in bucket_list])))
+        
+        # 2. Assign Rank Map
+        val_rank = {v: i for i, v in enumerate(unique_vals)}
+        
+        # 3. Draw
+        for item in bucket_list:
+            v_orig = item['val']
+            # Try to match float key
+            try:
+                v = float(v_orig)
+            except:
+                v = v_orig
+            
+            rank = val_rank.get(v, len(unique_vals))
+            pts = item['pts']
+
+            # NORMALIZE VECTORS
+            x1, y1, x2, y2 = pts
+            if abs(x1 - x2) < 0.1: # Vertical
+                # Force Bottom -> Top (y1 > y2)
+                if y1 < y2:
+                    x1, y1, x2, y2 = x2, y2, x1, y1
+            else: # Horizontal
+                # Force Left -> Right (x1 < x2)
+                if x1 > x2:
+                    x1, y1, x2, y2 = x2, y2, x1, y1
+
+            # Calculate Offset
+            scalar_off = (base_dist + (rank * step_dist))
+            final_off = scalar_off * sign_direction
+            
+            svg_list.append((z_dim, draw_dim(x1, y1, x2, y2, v, final_off, item['color'], item['label'], item['avoid'])))
+
+    render_bucket("bottom", dim_buckets["bottom"], 1)
+    render_bucket("top", dim_buckets["top"], -1)
+    render_bucket("left", dim_buckets["left"], -1)
+    render_bucket("right", dim_buckets["right"], 1)
+    render_bucket("left", dim_buckets["left"], -1)
+    render_bucket("right", dim_buckets["right"], -1)
 
     # 7. Render
     svg_list.sort(key=lambda x: x[0])
