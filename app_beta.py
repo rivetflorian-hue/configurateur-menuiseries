@@ -3336,25 +3336,25 @@ def generate_svg_v73():
         off_overall_v = -90 # Totale Hauteur (Gauche)
 
         # 1. COTES CUMULEES (Détails des zones)
-        # Horizontal (Largeur)
-        xs = sorted(list(set([z['x'] for z in zones_config] + [z['x']+z['w'] for z in zones_config])))
-        for k in range(len(xs)-1):
-            val = xs[k+1] - xs[k]
-            if val > 1: # Ignore micro-gaps
-                draw_dimension_line(svg, xs[k], 0, xs[k+1], 0, val, "", h_menuiserie+off_chain_h, "H", font_dim-4, 9)
-                
-        # Vertical (Hauteur)
-        ys = sorted(list(set([z['y'] for z in zones_config] + [z['y']+z['h'] for z in zones_config])))
-        for k in range(len(ys)-1):
-            val = ys[k+1] - ys[k]
-            if val > 1:
-                # On dessine à gauche (x=0 est le bord gauche du dormant)
-                # draw_dimension_line attend x1, y1...
-                # Pour Vertical: x_line est calculé par (x1 - offset) dans la fonction
-                # Si on passe x1=0, offset=40 => ligne à -40.
-                # Attention : ma fonction draw_dimension_line gère "V" en soustrayant l'offset.
-                # Donc si je veux être à -40, je dois passer offset=40 (avec x1=0).
-                draw_dimension_line(svg, 0, ys[k], 0, ys[k+1], val, "", -off_chain_v, "V", font_dim-4, 9)
+        # Display only if there are multiple zones (otherwise redundant with overall dimensions)
+        if len(zones_config) > 1:
+            # Horizontal (Largeur)
+            xs = sorted(list(set([z['x'] for z in zones_config] + [z['x']+z['w'] for z in zones_config])))
+            for k in range(len(xs)-1):
+                val = xs[k+1] - xs[k]
+                if val > 1: # Ignore micro-gaps
+                    draw_dimension_line(svg, xs[k], 0, xs[k+1], 0, val, "", h_menuiserie+off_chain_h, "H", font_dim-4, 9)
+                    
+            # Vertical (Hauteur)
+            # Center on Fin: ail_val / 2 if exists, else default 40
+            v_dim_offset = (ail_val / 2) if ail_val > 10 else 40
+            
+            ys = sorted(list(set([z['y'] for z in zones_config] + [z['y']+z['h'] for z in zones_config])))
+            for k in range(len(ys)-1):
+                val = ys[k+1] - ys[k]
+                if val > 1:
+                    # Pass offset as POSITIVE because function subtracts it for "V"
+                    draw_dimension_line(svg, 0, ys[k], 0, ys[k+1], val, "", v_dim_offset, "V", font_dim-4, 9)
 
         # 2. COTES TOTALES (Existantes, repoussées)
         # Cadre (Largeur)
@@ -3380,54 +3380,47 @@ def generate_svg_v73():
         h_visuel_total = abs(y_end_ht - y_start_ht)
         draw_dimension_line(svg, 0, y_start_ht, 0, y_end_ht, h_visuel_total, "", -off_overall_v+50, "V", font_dim, 9)
 
-        # HP (si applicable) - Reste au milieu
-        # On cherche la première zone qui a une HP définie
-        hp_z = None
-        for z in zones_config:
-            if 'h_poignee' in z['params']:
-                hp_z = z
-                break
-        
-        if hp_z is not None:
-             hp_val = hp_z['params']['h_poignee']
-             # Reference : Bas de la zone concernée
-             y_bottom_zone = hp_z['y'] + hp_z['h']
+        # HP (si applicable) - Iterate ALL valid zones (V75 Fix)
+        for hp_z in zones_config:
+            if 'h_poignee' in hp_z['params'] and hp_z['params']['h_poignee'] > 0:
+                 hp_val = hp_z['params']['h_poignee']
+                 # Reference : Bas de la zone concernée
+                 y_bottom_zone = hp_z['y'] + hp_z['h']
+                 
+                 # Position Poignée (Y dans SVG)
+                 y_hp = y_bottom_zone - hp_val
+                 
+                 # CALCUL POSITION REELLE POIGNEE (Copie logique draw_sash_content)
+                 vis_ouvrant = 55
+                 ox, oy, ow, oh = hp_z['x'], hp_z['y'], hp_z['w'], hp_z['h']
+                 type_ouv = hp_z['type']
+                 params = hp_z['params']
+                 
+                 # Default Center
+                 x_handle_pos = ox + ow / 2 
+                 
+                 if type_ouv == "1 Vantail":
+                     sens = params.get('sens', 'TG')
+                     if sens == 'TG': x_handle_pos = ox + ow - 28
+                     else: x_handle_pos = ox + 28
+                 elif type_ouv == "2 Vantaux":
+                     w_vtl = ow / 2
+                     is_princ_right = (params.get('principal', 'D') == 'D')
+                     if is_princ_right: x_handle_pos = (ox + w_vtl) + 28
+                     else: x_handle_pos = (ox + w_vtl) - 28
+                 
+                 # Draw Cote - Aligned with Handle X but shifted slightly
+                 # Dynamic Offset to push AWAY from Center (Towards Frame)
+                 sash_center_x = ox + ow / 2
+                 if x_handle_pos < sash_center_x:
+                     offset_line = -65 # Shift Left (Towards Left Frame) - Increased from 40
+                 else:
+                     offset_line = 65  # Shift Right (Towards Right Frame) - Increased from 40
+                 
+                 # Only draw if handle pos is reasonable
+                 draw_dimension_line(svg, x_handle_pos + offset_line, y_hp, x_handle_pos + offset_line, y_bottom_zone, hp_val, "HP : ", 0, "V", 20, 20, leader_fixed_start=x_handle_pos)
              
-             # Position Poignée (Y dans SVG)
-             y_hp = y_bottom_zone - hp_val
-             
-             
-             # Position X : Milieu de la zone (Croisement des triangles / Jonction)
-             # x_center_zone = hp_z['x'] + hp_z['w'] / 2 OLD
-             
-             # CALCUL POSITION REELLE POIGNEE (Copie logique draw_sash_content)
-             vis_ouvrant = 55
-             ox, oy, ow, oh = hp_z['x'], hp_z['y'], hp_z['w'], hp_z['h']
-             type_ouv = hp_z['type']
-             params = hp_z['params']
-             
-             # Default Center
-             x_handle_pos = ox + ow / 2 
-             
-             if type_ouv == "1 Vantail":
-                 sens = params.get('sens', 'TG')
-                 if sens == 'TG': x_handle_pos = ox + ow - 28
-                 else: x_handle_pos = ox + 28
-             elif type_ouv == "2 Vantaux":
-                 w_vtl = ow / 2
-                 is_princ_right = (params.get('principal', 'D') == 'D')
-                 if is_princ_right: x_handle_pos = (ox + w_vtl) + 28
-                 else: x_handle_pos = (ox + w_vtl) - 28
-             
-             # Draw Cote - Aligned with Handle X but shifted slightly
-             # Dynamic Offset to push AWAY from Center (Towards Frame)
-             sash_center_x = ox + ow / 2
-             if x_handle_pos < sash_center_x:
-                 offset_line = -40 # Shift Left (Towards Left Frame)
-             else:
-                 offset_line = 40  # Shift Right (Towards Right Frame)
-             
-             draw_dimension_line(svg, x_handle_pos + offset_line, y_hp, x_handle_pos + offset_line, y_bottom_zone, hp_val, "HP : ", 0, "V", 20, 20, leader_fixed_start=x_handle_pos)  
+
         
         # ANCIEN CODE (Supprimé)
         # has_ouvrant = any(z['type'] != "Fixe" for z in zones_config)
