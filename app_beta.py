@@ -687,7 +687,8 @@ def render_top_navigation():
     """Affiche la navigation supérieure (Projet, Mode, Liste)."""
     
     # 1. Ligne Supérieure : Nom Projet & Imports
-    c_proj, c_imp = st.columns([3, 1], vertical_alignment="bottom")
+    # V77 FIX: More space for buttons to prevent wrapping (2.5 vs 1.5)
+    c_proj, c_imp = st.columns([2.5, 1.5], vertical_alignment="bottom")
     
     with c_proj:
         # Style 'Title' for Project Name
@@ -5655,9 +5656,9 @@ ANNEXES_DB = {
     ],
     "PVC": {
         "Catalogues": [
-            "FPEE - PVC 70 - 76 Fenêtres et Portes Fenêtres.pdf",
-            "FPEE - PVC NOVELIA RFP Fenêtres et Portes Fenêtres.pdf",
-            "FPEE - PVC RFP Fenêtres et Portes Fenêtres.pdf"
+            "FPEE - PVC 70 - 76 Fenêtres et Portes Fenêtres.pdf",
+            "FPEE - PVC NOVELIA RFP Fenêtres et Portes Fenêtres.pdf",
+            "FPEE - PVC RFP Fenêtres et Portes Fenêtres.pdf"
         ],
         "Fiche technique": [
             "Doc tech PVC-A05 (FPEE)- 2023.pdf",
@@ -5669,7 +5670,7 @@ ANNEXES_DB = {
     },
     "ALU": {
         "Catalogues": [
-            "FPEE - ALUMINIUM Portes et Fenêtres.pdf",
+            "FPEE - ALUMINIUM Portes et Fenêtres.pdf",
             "FPEE - Portes.pdf"
         ],
         "Fiche techniques": [
@@ -5839,49 +5840,44 @@ def render_annexes():
              for f in mat_data.get("Mise en oeuvre", []):
                  render_doc_item(f, "meo")
 
-# --- MAIN LAYOUT V3 (Responsive Columns) ---
+# --- MAIN LAYOUT V77 (Logo in Left Col, Visualisation Top Right) ---
 
-# 1. Logo & Branding
-# 1. Logo & Branding
-# 1. Logo & Branding
-# Direct placement for maximum left alignment and size control
-# Remove columns to avoid gutters
-if 'LOGO_B64' in globals():
-    try:
-         # Robust Logic for Main UI Logo
-         try:
-             decoded = base64.b64decode(LOGO_B64, validate=True)
-         except:
-             b64 = LOGO_B64
-             b64 += "=" * ((4 - len(b64) % 4) % 4)
-             decoded = base64.b64decode(b64)
-         
-         st.image(decoded, width=300)
-    except Exception as e:
-         # Silent fail - User requested "no error messages"
-         pass
-else:
-     st.warning("Logo variable not found.")
-
-
-# Spacer between logo and Project Name
-st.write("")
-
-# 2. Top Navigation & Project Management
-render_top_navigation()
-
-# 2. Main Content Columns (Desktop: Config Left / Preview Right)
-# Mobile: Stacked automatically due to Streamlit columns behavior
-c_config, c_preview = st.columns([1, 1.3])
+# 1. Main Columns (Created FIRST to allow Visualization to start at top)
+c_config, c_preview = st.columns([1, 1.4])
 
 hab_config = None
 current_mode = st.session_state.get('mode_module', 'Menuiserie')
 
-# --- COLUMN LEFT: CONFIGURATION ---
+# --- COLUMN LEFT: CONFIGURATION + LOGO + NAV ---
 with c_config:
+    # 1. Logo & Branding
+    if 'LOGO_B64' in globals():
+        try:
+             # Robust Logic for Main UI Logo
+             try:
+                 decoded = base64.b64decode(LOGO_B64, validate=True)
+             except:
+                 b64 = LOGO_B64
+                 b64 += "=" * ((4 - len(b64) % 4) % 4)
+                 decoded = base64.b64decode(b64)
+             
+             st.image(decoded, width=300)
+        except Exception as e:
+             pass
+    else:
+         st.warning("Logo variable not found.")
+
+    st.write("") # Spacer
+
+    # 2. Top Navigation & Project Management
+    render_top_navigation()
+    
+    st.markdown("---")
+    
     # BOUTON RESET (RESTAURÉ)
     if st.button("❌ Réinitialiser", use_container_width=True, help="Remettre à zéro le formulaire"):
         reset_config()
+        st.rerun() # Force rerun to clear form immediately
         
     if current_mode == 'Menuiserie':
         st.markdown("### 🛠 Options Menuiserie")
