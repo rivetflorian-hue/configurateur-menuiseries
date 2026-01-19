@@ -509,6 +509,12 @@ ARTIFACT_DIR = os.path.join(current_dir, "assets")
 
 def init_project_state():
     """Initialise l'état du projet s'il n'existe pas."""
+    # V76 FIX: Apply Defered State Updates (To avoid Widget Instantiated Error)
+    if 'pending_updates' in st.session_state:
+        updates = st.session_state.pop('pending_updates')
+        for k, v in updates.items():
+            st.session_state[k] = v
+            
     if 'project' not in st.session_state:
         st.session_state['project'] = {
             "name": "Nouveau Projet",
@@ -580,7 +586,8 @@ def deserialize_config(data):
     # But for safety, we should clear dynamic keys
     # FIXED V73: Preserve 'mgr_sel_id' and 'active_config_id' to prevent loss of context
     # Also preserve 'uploader_json' to avoid re-triggering reload
-    keys_keep = ['project', 'mgr_sel_id', 'active_config_id', 'uploader_json', 'mode_module']
+    # V75 FIX: Remove 'mode_module' from keep list to ensure context switch works even if target is faulty
+    keys_keep = ['project', 'mgr_sel_id', 'active_config_id', 'uploader_json', 'clean_config_snapshot']
     keys_to_del = [k for k in st.session_state if k not in keys_keep]
     for k in keys_to_del:
         del st.session_state[k]
@@ -602,6 +609,23 @@ def deserialize_config(data):
         except Exception:
             # Fallback for non-copyable objects (rare in checking, but safe)
             st.session_state[k] = v
+            
+    # 3. SET CLEAN SNAPSHOT (V75 - Config Management)
+    # We take a snapshot of what we just loaded to be the "clean" state
+    st.session_state['clean_config_snapshot'] = json.dumps(data, sort_keys=True, default=str)
+
+def get_config_snapshot(current_data):
+    """Returns a serialized string of the current config for comparison."""
+    # Using sort_keys to ensure deterministic order
+    return json.dumps(current_data, sort_keys=True, default=str)
+
+def is_config_dirty(current_data):
+    """Checks if the current data differs from the loaded snapshot."""
+    if 'clean_config_snapshot' not in st.session_state:
+        return True # Default to dirty if no snapshot
+    
+    current_snap = get_config_snapshot(current_data)
+    return current_snap != st.session_state['clean_config_snapshot']
 
 # ... (omitted unrelated functions) ...
 
@@ -679,9 +703,62 @@ def update_current_config_in_project(config_id, data, ref_name):
 
 def delete_config_from_project(config_id):
     """Supprime une configuration."""
-    st.session_state['project']['configs'] = [
-        c for c in st.session_state['project']['configs'] if c['id'] != config_id
-    ]
+    if 'project' in st.session_state and 'configs' in st.session_state['project']:
+        old_len = len(st.session_state['project']['configs'])
+        # V76 Debug: Use list comprehension to create NEW list (effectively deleting)
+        new_list = [c for c in st.session_state['project']['configs'] if c['id'] != config_id]
+        
+        st.session_state['project']['configs'] = new_list
+        
+        # DEBUG
+        diff = old_len - len(new_list)
+        # st.toast(f"DEBUG: Deleted {diff} items. Remaining: {len(new_list)}")
+        print(f"DEBUG: Delete requested for {config_id}. Count before: {old_len}, Count after: {len(new_list)}")
+
+def convert_hab_json_to_state(data):
+    """Converts a Habillage JSON export into a Session State compatible dict."""
+    state = {}
+    
+    # 1. Base Copy
+    state.update(data)
+    
+    # 2. Map Model Name -> Key
+    model_name = data.get('modele')
+    model_key = None
+    if model_name:
+        for k, v in PROFILES_DB.items():
+            if v['name'] == model_name:
+                model_key = k
+                break
+    
+    if model_key:
+        state['hab_model_selector'] = model_key
+        # Map Dimensions
+        dims = data.get('dims', {})
+        if isinstance(dims, dict):
+            for p, val in dims.items():
+                state[f"hab_{model_key}_{p}"] = val
+                
+    # 3. Map Common Fields
+    if 'longueur' in data:
+        state['hab_length_input'] = data['longueur']
+        
+    if 'finition' in data:
+        state['hab_type_fin'] = data['finition']
+        
+    if 'epaisseur' in data:
+        state['hab_ep_v2'] = data['epaisseur']
+        
+    if 'observations' in data:
+        state['hab_obs'] = data['observations']
+    elif 'hab_obs' in data:
+        state['hab_obs'] = data['hab_obs']
+        
+    # 4. Ensure ID/Ref
+    if 'ref' in data: state['ref_id'] = data['ref']
+    if 'qte' in data: state['qte_val'] = data['qte']
+    
+    return state
 
 def render_top_navigation():
     """Affiche la navigation supérieure (Projet, Mode, Liste)."""
@@ -713,17 +790,66 @@ def render_top_navigation():
                 
                 st.download_button("Export (JSON)", proj_data, file_name=dl_name, mime="application/json")
                 
-                uploaded = st.file_uploader("Import JSON", type=['json'], key='uploader_json')
-                if uploaded and st.button("📥 Charger le Projet"):
-                     try:
-                        data = json.load(uploaded)
-                        if 'configs' in data:
-                            st.session_state['project'] = data
-                            st.session_state['active_config_id'] = None
-                            st.toast("Projet importé avec succès !")
-                            st.rerun()
-                     except Exception as e:
-                        st.error(f"Erreur : {e}")
+                def import_project_callback():
+                    uploaded = st.session_state.get('uploader_json')
+                    if uploaded:
+                        try:
+                            uploaded.seek(0)
+                            data = json.load(uploaded)
+                            
+                            # CASE 1: Full Project Import
+                            if isinstance(data, dict) and 'configs' in data:
+                                st.session_state['project'] = data
+                                st.session_state['active_config_id'] = None
+                                st.toast("✅ Projet complet chargé avec succès !")
+                                
+                            # CASE 2: Single Config Import (Add to current project)
+                            elif isinstance(data, dict) and ('ref_id' in data or 'mat_type' in data):
+                                # Determine Ref
+                                ref = data.get('ref_id', f"Import_{len(st.session_state['project']['configs'])+1}")
+                                new_id = str(uuid.uuid4())
+                                st.session_state['project']['configs'].append({
+                                    "id": new_id,
+                                    "ref": ref,
+                                    "data": data
+                                })
+                                st.toast(f"➕ Configuration '{ref}' ajoutée au projet !")
+                                
+                            # CASE 3: Habillage Import (Specific Keys or Rendered Report)
+                            elif isinstance(data, dict) and ('developpe' in data or 'modele' in data):
+                                # Convert Report Data to Session State format
+                                state_data = convert_hab_json_to_state(data)
+                                state_data['mode_module'] = 'Habillage'
+                                
+                                ref = data.get('ref', f"Habillage_{len(st.session_state['project']['configs'])+1}")
+                                
+                                # CHECK FOR DUPLICATES
+                                existing = next((c for c in st.session_state['project']['configs'] if c['ref'] == ref), None)
+                                
+                                if existing:
+                                    existing['data'] = state_data
+                                    st.toast(f"🔄 Habillage '{ref}' mis à jour !")
+                                else:
+                                    new_id = str(uuid.uuid4())
+                                    st.session_state['project']['configs'].append({
+                                        "id": new_id,
+                                        "ref": ref,
+                                        "data": state_data
+                                    })
+                                    st.toast(f"➕ Habillage '{ref}' ajouté au projet !")
+
+                                # RESET UI EXPANDERS
+                                st.session_state['ui_reset_counter'] = st.session_state.get('ui_reset_counter', 0) + 1
+                                
+                            else:
+                                keys = list(data.keys()) if isinstance(data, dict) else str(type(data))
+                                st.error(f"Format JSON inconnu. Clés trouvées: {keys}")
+                                
+                        except Exception as e:
+                            st.error(f"Erreur lors de l'import : {e}")
+                            
+                st.file_uploader("Import JSON", type=['json'], key='uploader_json')
+                st.button("📥 Charger le Projet / Config", on_click=import_project_callback)
 
     st.markdown("---")
     
@@ -742,33 +868,23 @@ def render_top_navigation():
         
         if user_mode != current_mode:
             st.session_state['mode_module'] = user_mode
+            # REVERTED V77: Do NOT clear active config on switch, as user perceives it as data loss.
+            # We accept that "Repère 1" stays active even if we switch module views.
             st.rerun()
             
     with c_list:
         configs = st.session_state['project']['configs']
         
-        # Filter configs by mode? User says "Si menuiserie cochée... liste menuiserie".
-        # We need 'config_type' in data. 
-        # Existing configs might not have it. Default to 'Menuiserie'.
-        # We'll filter the dropdown.
-        
         # V74 FIX: Unified List (User Request)
-        # Show ALL configs regardless of type, chronologically.
         filtered_configs = configs 
         
         if not filtered_configs:
             options = {}
         else:
-            # Show Type in label for clarity? e.g. "F1 (Menuiserie)" or just "F1"
-            # User example: "F1, H1, H2, F2"
             options = {c['id']: f"{c['ref']}" for c in filtered_configs}
             
-        # Selectbox for OPENING
-        # We use a placeholder "Sélectionner..." to allow re-selecting same item?
-        # Or just standard selectbox.
-        
         if options:
-            # V74 FIX: Handle pending selection (conflict avoidance)
+            # Handle pending selection
             if 'pending_new_id' in st.session_state:
                 target_id = st.session_state.pop('pending_new_id')
                 if target_id in options:
@@ -778,76 +894,120 @@ def render_top_navigation():
             if 'mgr_sel_id' not in st.session_state or st.session_state['mgr_sel_id'] not in options:
                 st.session_state['mgr_sel_id'] = list(options.keys())[0]
                 
-            c_l_sel, c_l_btn = st.columns([1.2, 0.8]) # V74 Fix: More button space
-            sel_id = c_l_sel.selectbox(
-                "Configurations Enregistrées", 
-                options.keys(), 
-                format_func=lambda x: options[x], 
-                key='mgr_sel_id', 
-                label_visibility="collapsed"
-            )
+            sel_id = st.session_state['mgr_sel_id']
             
-            with c_l_btn:
-                 # STATE MACHINE FOR CONFIRMATION
-                 # Keys: 'confirm_action': 'open' | 'delete' | None
-                 #       'confirm_target_id': id
+            # STATE MACHINE FOR CONFIRMATION
+            # Helper to clear state
+            def clear_confirm():
+                 st.session_state.pop('confirm_action', None)
+                 st.session_state.pop('confirm_target_id', None)
                  
-                 # Helper to clear state
-                 def clear_confirm():
-                     st.session_state.pop('confirm_action', None)
-                     st.session_state.pop('confirm_target_id', None)
+            # Check if we are in confirmation mode for THIS selected item (or generic)
+            current_action = st.session_state.get('confirm_action')
+            target_id = st.session_state.get('confirm_target_id')
+            
+            if current_action and target_id == sel_id:
+                 # SHOW CONFIRMATION UI (FULL WIDTH of c_list)
+                 # Avoid splitting columns to maximize space for the warning message
+                 
+                 ref_name = options.get(target_id, "???")
+                 if current_action == 'open':
+                     msg = f"⚠️ Ouvrir **{ref_name}** ?"
+                     sub_msg = "Non sauvegardé = Perdu"
+                 else:
+                     msg = f"🗑️ Supprimer **{ref_name}** ?"
+                     sub_msg = "Irréversible"
                      
-                 # Check if we are in confirmation mode for THIS selected item (or generic)
-                 current_action = st.session_state.get('confirm_action')
-                 target_id = st.session_state.get('confirm_target_id')
-                 
-                 if current_action and target_id == sel_id:
-                     # SHOW CONFIRMATION UI REPLACING BUTTONS
-                     ref_name = options.get(target_id, "???")
-                     if current_action == 'open':
-                         # FIXED: Proper newline for Streamlit MD/Info
-                         msg = f"⚠️ **Ouvrir '{ref_name}' ?**\n\n(Toutes modifications non sauvegardées seront perdues)"
-                     else:
-                         msg = f"🗑️ **Supprimer '{ref_name}' ?**\n\n(Cette action est irréversible)"
-                         
-                     st.info(msg) # Use Info or Warning to make it distinct
+                 # Compact Warning Box
+                 with st.container(border=True):
+                     st.write(f"{msg}")
+                     st.caption(f"({sub_msg})")
+                     
                      cc_yes, cc_no = st.columns(2)
-                     if cc_yes.button("✅ OUI", use_container_width=True, key="btn_yes"):
-                         target = next((c for c in configs if c['id'] == target_id), None)
-                         if current_action == 'open' and target:
+                     
+                     # DEFINE CALLBACKS
+                     def on_confirm_open(tid):
+                         target = next((c for c in configs if c['id'] == tid), None)
+                         if target:
+                              # CLEANUP 
+                              keys_to_cl = [k for k in st.session_state.keys() if k.startswith(("vr_", "men_", "hab_", "vit_", "active_reference", "vr_ref_in"))]
+                              for k in keys_to_cl: del st.session_state[k]
+                              
+                              deserialize_config(target["data"])
+                              st.session_state['active_config_id'] = target['id']
+                              st.session_state.get('pending_updates', {})['ref_id'] = target['ref'] 
+                              
+                              # Mode switch
+                              st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie')
+                              st.session_state['ui_reset_counter'] = st.session_state.get('ui_reset_counter', 0) + 1
+                              st.session_state.pop('confirm_action', None)
+                              
+
+                     def on_confirm_delete(tid):
+                         if 'project' in st.session_state and 'configs' in st.session_state['project']:
+                             # 1. Mutate
+                             st.session_state['project']['configs'] = [
+                                 c for c in st.session_state['project']['configs'] if c['id'] != tid
+                             ]
+                             # 2. Clear
+                             st.session_state['mgr_sel_id'] = None
+                             if st.session_state.get('active_config_id') == tid:
+                                  st.session_state['active_config_id'] = None
+                                  st.session_state['clean_config_snapshot'] = None
+                                  if 'ref_id' in st.session_state: del st.session_state['ref_id']
+                             
+                             st.session_state.pop('confirm_action', None)
+                     
+                     # CONDITIONAL BUTTON RENDER
+                     if current_action == 'open':
+                         st.button("✅ OUI", use_container_width=True, key="btn_yes_open", on_click=on_confirm_open, args=(target_id,))
+                     else:
+                         st.button("✅ OUI", use_container_width=True, key="btn_yes_del", on_click=on_confirm_delete, args=(target_id,))
+                             
+                     if cc_no.button("❌ NON", use_container_width=True, key="btn_no"):
+                         clear_confirm()
+                         st.rerun()
+                     
+            else:
+                 # STANDARD UI (Selector + Buttons)
+                 c_l_sel, c_l_btn = st.columns([1.2, 0.8])
+                 
+                 sel_id = c_l_sel.selectbox(
+                    "Configurations", 
+                    options.keys(), 
+                    format_func=lambda x: options[x], 
+                    key='mgr_sel_id', 
+                    label_visibility="collapsed"
+                 )
+                 
+                 with c_l_btn:
+                     cb_open, cb_del = st.columns(2)
+                     if cb_open.button("📂", use_container_width=True, help="Ouvrir"):
+                        # REVERT TO DIRECT LOGIC (V76 Fix - Critical)
+                        # We bypass the dirty check because it is unreliable (likely serialization mismatch).
+                        # We force load the target configuration directly.
+                        # This satisfies "No double click if no changes" (by removing double click entirely for now to fix the bug)
+                        # Ideally we would check `is_dirty` but it seems to be failing.
+                        
+                        target = next((c for c in configs if c['id'] == sel_id), None)
+                        if target:
+                             # CLEANUP OLD KEYS (Crucial for context switch)
                              keys_to_clear = [k for k in st.session_state.keys() if k.startswith(("vr_", "men_", "hab_", "vit_", "active_reference", "vr_ref_in"))]
                              for k in keys_to_clear: del st.session_state[k]
                              
                              deserialize_config(target["data"])
                              st.session_state['active_config_id'] = target['id']
                              st.session_state['ref_id'] = target['ref']
-                             # FIX: Explicitly set widget key to match loaded ref
                              st.session_state['vr_ref_in'] = target['ref']
                              
-                             st.session_state['mode_module'] = target['data'].get('mode_module', 'Menuiserie')
-                             st.toast(f"Ouverture de '{target['ref']}'...")
-                             clear_confirm()
-                             st.rerun()
-                         elif current_action == 'delete':
-                             delete_config_from_project(target_id)
-                             st.toast(f"Suppression de '{ref_name}' effectuée.")
-                             # If deleted, select another one? Handled by next render.
-                             clear_confirm()
-                             st.rerun()
+                             new_mode = target['data'].get('mode_module', 'Menuiserie')
+                             st.session_state['mode_module'] = new_mode
                              
-                     if cc_no.button("❌ NON", use_container_width=True, key="btn_no"):
-                         clear_confirm()
-                         st.rerun()
-                         
-                 else:
-                     # STANDARD BUTTONS
-                     cb_open, cb_del = st.columns(2)
-                     if cb_open.button("📂 Ouvrir", use_container_width=True, help="Ouvrir (Perd les modifs non sauvegardées)"):
-                        st.session_state['confirm_action'] = 'open'
-                        st.session_state['confirm_target_id'] = sel_id
-                        st.rerun()
+                             st.toast(f"✅ Ouverture de '{target['ref']}'")
+                             st.session_state['ui_reset_counter'] = st.session_state.get('ui_reset_counter', 0) + 1
+                             st.rerun()
                         
-                     if cb_del.button("🗑️ Suppr.", use_container_width=True, help="Supprimer définitivement"):
+                     if cb_del.button("🗑️", use_container_width=True, help="Supprimer"):
                         st.session_state['confirm_action'] = 'delete'
                         st.session_state['confirm_target_id'] = sel_id
                         st.rerun()
@@ -1448,31 +1608,42 @@ def draw_text(svg, x, y, text, font_size=12, fill="black", weight="normal", anch
     svg.append((z_index, f'<text x="{x}" y="{y}" font-family="Arial" font-size="{font_size}" fill="{fill}" font-weight="{weight}" text-anchor="{anchor}" dominant-baseline="middle" {transform}>{text}</text>'))
 
 def draw_dimension_line(svg_content, x1, y1, x2, y2, value, text_prefix="", offset=50, orientation="H", font_size=24, z_index=8, leader_fixed_start=None):
-    tick_size = 10
+    # V77 FIX: Fully Proportional Dimensions
+    # Derive tick size and layout spacing from font_size to ensure visibility at all scales
+    tick_size = font_size * 0.4  # e.g. 24 -> 10, 60 -> 24
+    text_gap = font_size * 0.6   # e.g. 24 -> 15
+    stroke_w = max(1, int(font_size * 0.05)) # Scale stroke slightly (1..3)
+    
     display_text = f"{text_prefix}{int(value)}"
     
     if orientation == "H":
         y_line = y1 + offset 
-        draw_rect(svg_content, x1, y_line, x2-x1, 2, "black", "black", 0, z_index)
+        draw_rect(svg_content, x1, y_line, x2-x1, stroke_w+1, "black", "black", 0, z_index)
         
         # Lignes de rappel
         start_y1 = leader_fixed_start if leader_fixed_start is not None else y1
         start_y2 = leader_fixed_start if leader_fixed_start is not None else y2
         
-        svg_content.append((z_index, f'<line x1="{x1}" y1="{start_y1}" x2="{x1}" y2="{y_line + tick_size}" stroke="black" stroke-width="1" stroke-dasharray="4,4" />'))
-        svg_content.append((z_index, f'<line x1="{x2}" y1="{start_y2}" x2="{x2}" y2="{y_line + tick_size}" stroke="black" stroke-width="1" stroke-dasharray="4,4" />'))
-        draw_text(svg_content, (x1 + x2) / 2, y_line - 15, display_text, font_size=font_size, weight="bold", z_index=z_index)
+        svg_content.append((z_index, f'<line x1="{x1}" y1="{start_y1}" x2="{x1}" y2="{y_line + tick_size}" stroke="black" stroke-width="{stroke_w}" stroke-dasharray="{stroke_w*4},{stroke_w*4}" />'))
+        svg_content.append((z_index, f'<line x1="{x2}" y1="{start_y2}" x2="{x2}" y2="{y_line + tick_size}" stroke="black" stroke-width="{stroke_w}" stroke-dasharray="{stroke_w*4},{stroke_w*4}" />'))
+        draw_text(svg_content, (x1 + x2) / 2, y_line - text_gap, display_text, font_size=font_size, weight="bold", z_index=z_index)
     elif orientation == "V":
         x_line = x1 - offset
-        draw_rect(svg_content, x_line, y1, 2, y2-y1, "black", "black", 0, z_index)
+        # V79 FIX: Ensure height is positive for rect
+        h_line = y2 - y1
+        y_rect = y1
+        if h_line < 0:
+            h_line = abs(h_line)
+            y_rect = y2
+        draw_rect(svg_content, x_line, y_rect, stroke_w+1, h_line, "black", "black", 0, z_index)
         
         start_x1 = leader_fixed_start if leader_fixed_start is not None else x1
         start_x2 = leader_fixed_start if leader_fixed_start is not None else x2
 
-        svg_content.append((z_index, f'<line x1="{start_x1}" y1="{y1}" x2="{x_line - tick_size}" y2="{y1}" stroke="black" stroke-width="1" stroke-dasharray="4,4" />'))
-        svg_content.append((z_index, f'<line x1="{start_x2}" y1="{y2}" x2="{x_line - tick_size}" y2="{y2}" stroke="black" stroke-width="1" stroke-dasharray="4,4" />'))
+        svg_content.append((z_index, f'<line x1="{start_x1}" y1="{y1}" x2="{x_line - tick_size}" y2="{y1}" stroke="black" stroke-width="{stroke_w}" stroke-dasharray="{stroke_w*4},{stroke_w*4}" />'))
+        svg_content.append((z_index, f'<line x1="{start_x2}" y1="{y2}" x2="{x_line - tick_size}" y2="{y2}" stroke="black" stroke-width="{stroke_w}" stroke-dasharray="{stroke_w*4},{stroke_w*4}" />'))
         
-        txt_x = x_line - 15
+        txt_x = x_line - text_gap
         txt_y = (y1 + y2) / 2
         draw_text(svg_content, txt_x, txt_y, display_text, font_size=font_size, fill="black", weight="bold", anchor="middle", z_index=z_index, rotation=-90)
 
@@ -1492,7 +1663,7 @@ def draw_handle_icon(svg, x, y, z_index=20, rotation=0):
     # 3. Pivot Point
     svg.append((z_index+2, f'<circle cx="{x}" cy="{y}" r="6" fill="#666" {transform} />'))
 
-def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=10):
+def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=10, font_dim_ref=16):
     c_frame = config_global['color_frame']
     vis_ouvrant = 55 
     
@@ -1533,10 +1704,10 @@ def draw_sash_content(svg, x, y, w, h, type_ouv, params, config_global, z_base=1
             ltx = lx + lw - 30 
             if pos_trav == "Sur mesure (du bas)":
                # Cote depuis le bas
-               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_custom, "", -10, "V", font_size=16, z_index=z_eff+10)
+               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_custom, "", -10, "V", font_size=font_dim_ref, z_index=z_eff+10)
             else:
                h_reel_bas = (ly+lh) - y_center
-               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_reel_bas, "", -10, "V", font_size=16, z_index=z_eff+10)
+               draw_dimension_line(svg, ltx, y_center, ltx, ly+lh, h_reel_bas, "", -10, "V", font_size=font_dim_ref, z_index=z_eff+10)
 
         else:
             # MODE GLOBAL / PETITS BOIS (GRID)
@@ -2746,7 +2917,8 @@ def render_habillage_main_ui(cfg):
         hab_data = {
             "ref": cfg['ref'], "modele": prof['name'], "qte": cfg['qte'],
             "dims": cfg['inputs'], "longueur": cfg['length'], "developpe": dev,
-            "finition": cfg['finition'], "epaisseur": cfg['epaisseur'], "couleur": cfg['couleur']
+            "finition": cfg['finition'], "epaisseur": cfg['epaisseur'], "couleur": cfg['couleur'],
+            "observations": st.session_state.get('hab_obs', '')
         }
         json_hab = json.dumps(hab_data, indent=2, ensure_ascii=False)
         st.download_button("💾 Export JSON", json_hab, f"habillage_{cfg['ref']}.json", "application/json", use_container_width=True)
@@ -2758,26 +2930,30 @@ def render_habillage_form():
     """Renders the Sidebar inputs for Habillage and returns the config dict."""
     config = {}
     
+    # Reset Mechanism: Visible Suffix (Robust)
+    # Using visible dots to force reset.
+    ctr = st.session_state.get('ui_reset_counter', 0)
+    # DEBUG - REMOVE AFTER VERIFICATION
+    # st.write(f"DEBUG REST CTR: {ctr}") 
+    
+    suffixes = ["", " .", " ..", " ..."]
+    reset_suffix = suffixes[ctr % 4]
+    
     # 0. Identification
-    with st.expander("📝 1. Repère et quantité", expanded=False):
+    with st.expander(f"📝 1. Repère et quantité{reset_suffix}", expanded=False):
         c_ref, c_qte = st.columns([3, 1])
-        # CHANGEMENT: Default Ref Repère 1
         
         # HANDLE PENDING REF UPDATE (Fix StreamlitAPIException)
         if 'pending_ref_id' in st.session_state:
             st.session_state['ref_id'] = st.session_state.pop('pending_ref_id')
             
-        if 'pending_ref_id' in st.session_state:
-            st.session_state['ref_id'] = st.session_state.pop('pending_ref_id')
-            
         base_ref = st.session_state.get('ref_id', get_next_project_ref())
-        # If user switched from Menuiserie to Habillage, logic handles it?
-        # The session state 'ref_id' is shared. 
-        # If current is "F1" (default Menuiserie) and we switch to Habillage, 
-        # we might want to propose "H1" if it looks like a default.
-        # NOW UNIFIED: Repère 1 for everyone.
-        
-        ref_chantier = c_ref.text_input("Référence", value=base_ref, key="ref_id")
+        # Ensure key exists to avoid warning
+        if 'ref_id' not in st.session_state:
+            st.session_state['ref_id'] = base_ref
+
+        # Removed `value` argument because key is present in session_state
+        ref_chantier = c_ref.text_input("Référence", key="ref_id")
         qte_piece = c_qte.number_input("Qté", 1, 100, 1, key="qte_val")
         config["ref"] = ref_chantier
         config["qte"] = qte_piece
@@ -2786,7 +2962,7 @@ def render_habillage_form():
     profile_keys = list(PROFILES_DB.keys())
     model_labels = {k: PROFILES_DB[k]["name"] for k in profile_keys}
     
-    with st.expander("📐 2. Modèle & Dimensions", expanded=False):
+    with st.expander(f"📐 2. Modèle & Dimensions{reset_suffix}", expanded=False):
         # CHANGEMENT: Index 0 (Modèle 1 Plat / Chant)
         # Added explicit key to ensure reset clears it
         selected_key = st.selectbox("Modèle", profile_keys, format_func=lambda x: model_labels[x], index=0, key="hab_model_selector")
@@ -2864,7 +3040,7 @@ def render_habillage_form():
         config["length"] = length # Ensure key matches usage
 
     # 3. Finition
-    with st.expander("🎨 3. Finition", expanded=False):
+    with st.expander(f"🎨 3. Finition{reset_suffix}", expanded=False):
         # Type Finition choices
         type_fin_choices = ["Prélaqué 1 face", "Prélaqué 2 faces", "Laquage 1 face", "Laquage 2 faces", "Brut", "Galva"]
         type_finition = st.selectbox("Type", type_fin_choices, index=0, key="hab_type_fin")
@@ -2924,11 +3100,9 @@ def render_habillage_form():
         config["finition"] = type_finition
         config["epaisseur"] = epaisseur
         config["couleur"] = couleur
-
-    # Finition END
     
     # 4. Observations
-    with st.expander("📝 4. Observations", expanded=False):
+    with st.expander(f"📝 4. Observations{reset_suffix}", expanded=False):
         c_obs = st.container()
         st.session_state['hab_obs'] = c_obs.text_area("Notes", value=st.session_state.get('hab_obs', ''), key="hab_obs_in")
     
@@ -2945,43 +3119,79 @@ def render_habillage_form():
     c_btn0, c_btn1, c_btn2 = st.columns(3)
     
     # ACTION: UPDATE (Only if active file)
-    if active_id:
-         if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
-             data = serialize_config()
-             data['mode_module'] = 'Habillage' # Ensure consistency
+    # V75 UPDATE: Consolidated "Enregistrer" Button
+    c_btn0, c_btn1, c_btn2 = st.columns(3)
+    
+    # 1. ENREGISTRER (Save current state, whether New or Existing)
+    if c_btn0.button("💾 Enregistrer", use_container_width=True, help="Sauvegarder la configuration actuelle"):
+         data = serialize_config()
+         data['mode_module'] = 'Habillage' 
+         
+         if active_id:
+             # UPDATE EXISTING
              current_ref = st.session_state.get('ref_id', 'Repère 1')
-             
-             # Helper function in project_utils.py ? Or implemented here.
-             # Need to find 'update_current_config_in_project' in namespace.
-             # It is imported.
              update_current_config_in_project(active_id, data, current_ref)
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
              st.toast(f"✅ {current_ref} mis à jour !")
              st.rerun()
+         else:
+             # CREATE NEW
+             new_ref = st.session_state.get('ref_id', 'Repère 1')
+             new_id = add_config_to_project(data, new_ref)
+             
+             # Set as Active
+             st.session_state['active_config_id'] = new_id
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
+             st.toast(f"✅ {new_ref} enregistré !")
+             st.rerun()
     
-    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="hab_btn_add"):
+    # 1. Dupliquer (Save Copy)
+    if c_btn1.button("Dupliquer", use_container_width=True, key="hab_btn_add", help="Créer une copie"):
         data = serialize_config()
         data['mode_module'] = 'Habillage'
-        new_ref = st.session_state.get('ref_id', 'H1')
+        
+        current_ref = st.session_state.get('ref_id', 'H1')
+        new_ref = f"{current_ref} (Copie)"
+        
         new_id = add_config_to_project(data, new_ref)
-        # Fix: Use pending_new_id to avoid "notify after instantiate" error
-        st.session_state['pending_new_id'] = new_id
-        # AUTO-INCREMENT REF
-        st.session_state['pending_ref_id'] = get_next_ref(new_ref)
-        st.toast(f"✅ {new_ref} ajouté !")
+        
+        # Switch to duplicate
+        st.session_state['active_config_id'] = new_id
+        
+        # V76 Fix: Use pending_updates for widget keys
+        if 'pending_updates' not in st.session_state: st.session_state['pending_updates'] = {}
+        st.session_state['pending_updates']['ref_id'] = new_ref
+
+        st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+        
+        st.toast(f"✅ Copie créée : {new_ref}")
         st.rerun()
 
-    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="hab_btn_new"):
+    # 2. Nouveau (Reset)
+    if c_btn2.button("Nouveau (Reset)", use_container_width=True, key="hab_btn_new", help="Sauvegarder et Réinitialiser"):
         data = serialize_config()
         data['mode_module'] = 'Habillage'
-        new_ref = st.session_state.get('ref_id', 'Repère 1')
-        new_id = add_config_to_project(data, new_ref)
-        st.session_state['pending_new_id'] = new_id
-        st.toast(f"✅ {new_ref} enregistré !")
+        current_ref = st.session_state.get('ref_id', 'Repère 1')
         
-        st.toast(f"✅ {new_ref} enregistré !")
+        if active_id:
+            # UPDATE EXISTING
+            update_current_config_in_project(active_id, data, current_ref)
+            st.toast(f"✅ {current_ref} mis à jour !")
+        else:
+            # CREATE NEW
+            add_config_to_project(data, current_ref)
+            st.toast(f"✅ {current_ref} enregistré !")
         
         # Reset but DO NOT RERUN yet
         reset_config(rerun=False)
+        st.session_state['clean_config_snapshot'] = None
+        st.session_state['active_config_id'] = None
         
         # AUTO-INCREMENT REF (Now this code is reachable)
         st.session_state['pending_ref_id'] = get_next_project_ref()
@@ -3182,39 +3392,83 @@ def render_menuiserie_form():
     c_btn0, c_btn1, c_btn2 = st.columns(3)
     
     # ACTION: UPDATE (Menuiserie)
-    if active_id:
-        if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
-             data = serialize_config()
-             data['mode_module'] = 'Menuiserie'
+    # ACTION: UPDATE (Menuiserie)
+    # V75 UPDATE: Consolidated "Enregistrer" Button
+    if c_btn0.button("💾 Enregistrer", use_container_width=True, help="Sauvegarder la configuration actuelle"):
+         data = serialize_config()
+         data['mode_module'] = 'Menuiserie'
+         
+         if active_id:
+             # UPDATE EXISTING
              current_ref = st.session_state.get('ref_id', 'Repère 1')
              update_current_config_in_project(active_id, data, current_ref)
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
              st.toast(f"✅ {current_ref} mis à jour !")
              st.rerun()
+         else:
+             # CREATE NEW
+             new_ref = st.session_state.get('ref_id', 'Repère 1')
+             new_id = add_config_to_project(data, new_ref)
+             
+             # Set as Active
+             st.session_state['active_config_id'] = new_id
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
+             st.toast(f"✅ {new_ref} enregistré !")
+             st.rerun()
 
-    # 1. Ajouter et Dupliquer (Save as New, Keep Editing)
-    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, help="Enregistrer une copie"):
+    # 1. Dupliquer (Save Copy)
+    if c_btn1.button("Dupliquer", use_container_width=True, help="Créer une copie de la configuration actuelle"):
         data = serialize_config()
-        # Ensure mode_module is saved
         data['mode_module'] = 'Menuiserie'
-        new_ref = st.session_state.get('ref_id', 'Repère 1')
+        
+        # If we are editing "Repère 1", we want the copy to be "Repère 1 (Copie)" or similar?
+        # Or just "Repère 1" (new ID).
+        # Standard behavior: Add as NEW entry.
+        
+        current_ref = st.session_state.get('ref_id', 'Repère 1')
+        new_ref = f"{current_ref} (Copie)"
         
         new_id = add_config_to_project(data, new_ref)
-        st.session_state['pending_new_id'] = new_id # Fix error
-        # AUTO-INCREMENT REF
-        st.session_state['pending_ref_id'] = get_next_ref(new_ref)
-        st.toast(f"✅ {new_ref} ajouté à la liste !")
+        
+        # Switch to the duplicate?
+        st.session_state['active_config_id'] = new_id
+        
+        # V76 Fix: Use pending_updates for widget keys
+        if 'pending_updates' not in st.session_state: st.session_state['pending_updates'] = {}
+        st.session_state['pending_updates']['ref_id'] = new_ref
+        
+        st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+        
+        st.toast(f"✅ Copie créée : {new_ref}")
         st.rerun()
         
-    # 2. Ajouter et Nouveau (Save as New, Reset)
-    if c_btn2.button("Ajouter & Nouveau", use_container_width=True):
+    # 2. Enregistrer & Nouveau (Save & Reset)
+    if c_btn2.button("Nouveau (Reset)", use_container_width=True, help="Sauvegarder et Réinitialiser"):
         data = serialize_config()
         data['mode_module'] = 'Menuiserie'
-        new_ref = st.session_state.get('ref_id', 'Repère 1')
+        current_ref = st.session_state.get('ref_id', 'Repère 1')
         
-        new_id = add_config_to_project(data, new_ref)
-        st.session_state['pending_new_id'] = new_id
-        st.toast(f"✅ {new_ref} enregistré !")
-        
+        if active_id:
+            # UPDATE EXISTING
+            update_current_config_in_project(active_id, data, current_ref)
+            st.toast(f"✅ {current_ref} mis à jour !")
+        else:
+            # CREATE NEW
+            add_config_to_project(data, current_ref)
+            st.toast(f"✅ {current_ref} enregistré !")
+            
+        # RESET
+        reset_config(rerun=False)
+        st.session_state['clean_config_snapshot'] = None # Clear snapshot on reset
+        st.session_state['active_config_id'] = None
+        st.session_state['pending_ref_id'] = get_next_project_ref()
+        st.rerun()
         # RESET (No Rerun)
         reset_config(rerun=False) 
         # AUTO-INCREMENT REF
@@ -3276,12 +3530,18 @@ def generate_svg_v73():
     by = -ht_haut
     bw = l_dos_dormant + 2*ail_val
     bh = h_menuiserie + ht_haut + ht_bas
+    
+    # V76 FIX: Dynamic Font Size for Scaling
+    # Base font size = 1.5% of the largest dimension, clamped between 12 and 100
+    max_dim = max(bw, bh)
+    font_dim = max(16, int(max_dim * 0.02))
+    
     # V73 FIX: Visible Dormant Frame (Stroke black)
     draw_rect(svg, bx, by, bw, bh, col_fin, "black", 1, 0)
     
     if vr_opt:
         draw_rect(svg, 0, -h_vr, l_dos_dormant, h_vr, cfg_global['color_frame'], "black", 1, 1)
-        draw_text(svg, l_dos_dormant/2, -h_vr/2, f"COFFRE {int(h_vr)}", font_size=16, fill="white" if "Blanc" not in col_int else "black", weight="bold", z_index=5)
+        draw_text(svg, l_dos_dormant/2, -h_vr/2, f"COFFRE {int(h_vr)}", font_size=font_dim, fill="white" if "Blanc" not in col_int else "black", weight="bold", z_index=5)
         if vr_grille:
              gx = (l_dos_dormant - 250)/2
              gy = -h_vr/2 + 20
@@ -3309,7 +3569,7 @@ def generate_svg_v73():
     for i, z in enumerate(zones_config):
         # FIX: Remove th_dorm padding to avoid double-thickness (130mm mullions)
         # zones touch each other; vis_fixe/vis_ouvrant handles the frame face.
-        draw_sash_content(svg, z['x'], z['y'], z['w'], z['h'], z['type'], z['params'], cfg_global, z_base=4)
+        draw_sash_content(svg, z['x'], z['y'], z['w'], z['h'], z['type'], z['params'], cfg_global, z_base=4, font_dim_ref=font_dim)
         
         # DRAW ZONE LABEL (V73 REFINED: Discreet, Top-Left)
         if 'label' in z:
@@ -3327,14 +3587,21 @@ def generate_svg_v73():
 
     try:
         # --- COTATION ---
-        font_dim = 26
+        # font_dim already calculated above
         
         # OFFSETS
-        off_chain_h = 40   # Details Largeur (Bas)
-        off_overall_h = 90 # Totale Largeur (Bas)
+        # OFFSETS
+        # V78 FIX: Robust Layering System
+        # We define 3 layers of dimensions: Details, Frame, Total
+        # Each layer is spaced by 'dim_step'
+        dim_step = font_dim * 2.0 # Generous spacing
         
-        off_chain_v = -40  # Details Hauteur (Gauche)
-        off_overall_v = -90 # Totale Hauteur (Gauche)
+        # OFFSETS (Positive values, direction handled by draw_dimension_line)
+        # H: Added to y (Down)
+        # V: Subtracted from x (Left)
+        layer_1 = dim_step       # Details
+        layer_2 = dim_step * 2.2 # Frame (Slightly more gap)
+        layer_3 = dim_step * 3.4 # Total
 
         # 1. COTES CUMULEES (Détails des zones)
         # Display only if there are multiple zones (otherwise redundant with overall dimensions)
@@ -3344,11 +3611,12 @@ def generate_svg_v73():
             for k in range(len(xs)-1):
                 val = xs[k+1] - xs[k]
                 if val > 1: # Ignore micro-gaps
-                    draw_dimension_line(svg, xs[k], 0, xs[k+1], 0, val, "", h_menuiserie+off_chain_h, "H", font_dim-4, 9)
+                    draw_dimension_line(svg, xs[k], 0, xs[k+1], 0, val, "", h_menuiserie+layer_1, "H", font_dim-4, 9)
                     
             # Vertical (Hauteur)
-            # Center on Fin: ail_val / 2 if exists, else default 40
-            v_dim_offset = (ail_val / 2) if ail_val > 10 else 40
+            # Vertical (Hauteur)
+            # Use Layer 1 
+            v_dim_offset = layer_1
             
             ys = sorted(list(set([z['y'] for z in zones_config] + [z['y']+z['h'] for z in zones_config])))
             for k in range(len(ys)-1):
@@ -3358,20 +3626,20 @@ def generate_svg_v73():
                     draw_dimension_line(svg, 0, ys[k], 0, ys[k+1], val, "", v_dim_offset, "V", font_dim-4, 9)
 
         # 2. COTES TOTALES (Existantes, repoussées)
-        # Cadre (Largeur)
-        draw_dimension_line(svg, 0, 0, l_dos_dormant, 0, l_dos_dormant, "", h_menuiserie+off_overall_h, "H", font_dim, 9)
+        # 2. COTES TOTALES (Existantes, repoussées)
+        # Cadre (Largeur) -> Layer 2
+        draw_dimension_line(svg, 0, 0, l_dos_dormant, 0, l_dos_dormant, "", h_menuiserie+layer_2, "H", font_dim, 9)
         
-        # Hors Tout (Largeur)
+        # Hors Tout (Largeur) -> Layer 3
         l_ht = l_dos_dormant + 2*ail_val
-        draw_dimension_line(svg, -ail_val, 0, l_dos_dormant+ail_val, 0, l_ht, "", h_menuiserie+off_overall_h+50, "H", font_dim, 9)
+        draw_dimension_line(svg, -ail_val, 0, l_dos_dormant+ail_val, 0, l_ht, "", h_menuiserie+layer_3, "H", font_dim, 9)
 
 
         # Cadre (Hauteur)
         top_dormant_y = -h_vr if vr_opt else 0
         h_dos_calc = h_menuiserie + (h_vr if vr_opt else 0)
         # Offset positif pour "V" part vers la gauche.
-        # Je veux être à -90. Donc offset 90.
-        draw_dimension_line(svg, 0, top_dormant_y, 0, h_menuiserie, h_dos_calc, "", -off_overall_v, "V", font_dim, 9)
+        draw_dimension_line(svg, 0, top_dormant_y, 0, h_menuiserie, h_dos_calc, "", layer_2, "V", font_dim, 9)
 
         # Hors Tout (Hauteur)
         ht_haut = h_vr + ail_val if vr_opt else ail_val
@@ -3379,7 +3647,7 @@ def generate_svg_v73():
         y_start_ht = -ht_haut
         y_end_ht = h_menuiserie + ht_bas
         h_visuel_total = abs(y_end_ht - y_start_ht)
-        draw_dimension_line(svg, 0, y_start_ht, 0, y_end_ht, h_visuel_total, "", -off_overall_v+50, "V", font_dim, 9)
+        draw_dimension_line(svg, 0, y_start_ht, 0, y_end_ht, h_visuel_total, "", layer_3, "V", font_dim, 9)
 
         # HP (si applicable) - Iterate ALL valid zones (V75 Fix)
         for hp_z in zones_config:
@@ -3412,14 +3680,17 @@ def generate_svg_v73():
                  
                  # Draw Cote - Aligned with Handle X but shifted slightly
                  # Dynamic Offset to push AWAY from Center (Towards Frame)
+                 # Use font_dim proportional offset
+                 dist_offset = font_dim * 3.5
                  sash_center_x = ox + ow / 2
                  if x_handle_pos < sash_center_x:
-                     offset_line = -65 # Shift Left (Towards Left Frame) - Increased from 40
+                     offset_line = -dist_offset 
                  else:
-                     offset_line = 65  # Shift Right (Towards Right Frame) - Increased from 40
+                     offset_line = dist_offset
                  
                  # Only draw if handle pos is reasonable
-                 draw_dimension_line(svg, x_handle_pos + offset_line, y_hp, x_handle_pos + offset_line, y_bottom_zone, hp_val, "HP : ", 0, "V", 20, 20, leader_fixed_start=x_handle_pos)
+                 draw_dimension_line(svg, x_handle_pos + offset_line, y_hp, x_handle_pos + offset_line, y_bottom_zone, hp_val, "HP : ", 0, "V", font_dim, 20, leader_fixed_start=x_handle_pos)
+
              
 
         
@@ -3428,34 +3699,41 @@ def generate_svg_v73():
         # if has_ouvrant:
         #    hp_val = 1050 ...
 
-        # Cadre (Hauteur)
+        # Cadre (Hauteur) -> Layer 2
         top_dormant_y = -h_vr if vr_opt else 0
         h_dos_calc = h_menuiserie + (h_vr if vr_opt else 0)
-        # Fix NameError: Use -off_overall_v (90)
-        draw_dimension_line(svg, 0, top_dormant_y, 0, h_menuiserie, h_dos_calc, "", -off_overall_v, "V", font_dim, 9)
+        # Offset is POSITIVE for V because it goes Left
+        draw_dimension_line(svg, 0, top_dormant_y, 0, h_menuiserie, h_dos_calc, "", layer_2, "V", font_dim, 9)
 
-        # Hors Tout (Hauteur)
+        # Hors Tout (Hauteur) -> Layer 3
         ht_haut = h_vr + ail_val if vr_opt else ail_val
         ht_bas = ail_bas
         y_start_ht = -ht_haut
         y_end_ht = h_menuiserie + ht_bas
         h_visuel_total = abs(y_end_ht - y_start_ht)
-        # Fix NameError: Use -off_overall_v + 50 (140)
-        draw_dimension_line(svg, 0, y_start_ht, 0, y_end_ht, h_visuel_total, "", -off_overall_v + 50, "V", font_dim, 9)
+        draw_dimension_line(svg, 0, y_start_ht, 0, y_end_ht, h_visuel_total, "", layer_3, "V", font_dim, 9)
 
         # DEFS & RETURN
         defs = ""
         svg_str = "".join([el[1] for el in sorted(svg, key=lambda x:x[0])])
         
-        margin_left_dims = 260
-        margin_bottom_dims = 220
-        margin_tight = 20
+        # V79 FIX: Dynamic ViewBox Margins
+        # Ensure the viewbox includes the furthest dimension layer (layer_3) plus padding for text
+        safe_margin = layer_3 + (font_dim * 2.5) 
         
-        vb_x = -margin_left_dims
-        vb_y = -ht_haut - margin_tight
-        vb_w = (l_dos_dormant + ail_val + margin_tight) - vb_x
-        bbox_bottom = max(h_menuiserie + ht_bas, h_menuiserie + margin_bottom_dims)
-        vb_h = bbox_bottom - vb_y
+        # Current Bounding Box of the Object
+        obj_x_min = -ail_val
+        obj_y_min = -ht_haut
+        obj_x_max = l_dos_dormant + ail_val
+        obj_y_max = h_menuiserie + ht_bas
+        
+        # ViewBox definition
+        vb_x = obj_x_min - safe_margin  # Left Margin (for Vertical dims)
+        vb_y = obj_y_min - 50            # Top Margin (Minimal, unless Top dims added later)
+        
+        vb_w = (obj_x_max - vb_x) + safe_margin   # Right Margin Dynamic
+
+        vb_h = (obj_y_max - vb_y) + safe_margin # Height = Object Bottom - VB Top + Bottom Margin (for Horizontal dims)
         
         return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" style="background-color:white;">{defs}{svg_str}</svg>'
     except Exception as e:
@@ -3627,28 +3905,62 @@ def render_volet_form():
     c_btn0, c_btn1, c_btn2 = st.columns(3)
 
     # 1. UPDATE (Mettre à jour) - Only if editing existing
-    if active_id:
-        if c_btn0.button("💾 Mettre à jour", use_container_width=True, help="Écraser la configuration active"):
-            # Update Logic
-            configs = s.get('project', {}).get('configs', [])
+    # V75 UPDATE: Consolidated "Enregistrer" Button
+    if c_btn0.button("💾 Enregistrer", use_container_width=True, help="Sauvegarder la configuration actuelle"):
+        # Update Logic
+        configs = s.get('project', {}).get('configs', [])
+        
+        # Determine Reference: Logic is slightly complex for VR because of manual input vs auto
+        data = prepare_data()
+        current_ref = data['ref_id'] 
+
+        if active_id:
+            # UPDATE EXISTING
             target_idx = next((i for i, c in enumerate(configs) if c['id'] == active_id), -1)
             
             if target_idx >= 0:
-                data = prepare_data()
                 configs[target_idx]['data'] = data
-                configs[target_idx]['ref'] = data['ref_id']
+                configs[target_idx]['ref'] = current_ref
                 # Sync session ref
-                s['ref_id'] = data['ref_id']
-                st.toast(f"✅ {data['ref_id']} mis à jour !")
+                s['ref_id'] = current_ref
+                
+                # Update Snapshot
+                st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+                
+                st.toast(f"✅ {current_ref} mis à jour !")
                 st.rerun()
             else:
                 st.error("Erreur: Configuration introuvable pour mise à jour.")
+        else:
+             # CREATE NEW (Save)
+             # Add to project
+             new_id = str(uuid.uuid4())
+             new_config = {
+                'id': new_id,
+                'ref': current_ref,
+                'data': data,
+                'config_type': 'Volet Roulant'
+            }
+             if 'project' not in s: s['project'] = {'configs': []}
+             s['project']['configs'].append(new_config)
+             
+             # Set Active
+             s['active_config_id'] = new_id
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
+             st.toast(f"✅ {current_ref} enregistré !")
+             st.rerun()
 
     # 2. Ajouter & Dupliquer
-    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, help="Enregistrer une copie"):
+    # 2. Dupliquer (Save Copy)
+    if c_btn1.button("Dupliquer", use_container_width=True, help="Créer une copie"):
         import uuid
         new_id = str(uuid.uuid4())
-        new_ref = get_next_ref()
+        
+        current_ref = s.get('ref_id', 'VR-01')
+        new_ref = f"{current_ref} (Copie)"
         
         data = prepare_data()
         data['ref_id'] = new_ref # Force new ref
@@ -3665,13 +3977,50 @@ def render_volet_form():
         
         # Switch to new duplicate
         s['active_config_id'] = new_id
-        s['ref_id'] = new_ref
         
-        st.toast(f"✅ {new_ref} ajouté (Copie) !")
+        # V76 Fix: Use pending_updates for widget keys
+        if 'pending_updates' not in st.session_state: st.session_state['pending_updates'] = {}
+        st.session_state['pending_updates']['ref_id'] = new_ref
+        
+        st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+        
+        st.toast(f"✅ Copie créée : {new_ref}")
         st.rerun()
             
-    # 3. Ajouter & Nouveau (Reset)
-    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, help="Sauvegarder et remet à zéro"):
+    # 3. Nouveau (Reset)
+    if c_btn2.button("Nouveau (Reset)", use_container_width=True, help="Sauvegarder et remet à zéro"):
+        data = prepare_data()
+        current_ref = data['ref_id']
+        
+        if active_id:
+            # UPDATE EXISTING
+            configs = s.get('project', {}).get('configs', [])
+            target_idx = next((i for i, c in enumerate(configs) if c['id'] == active_id), -1)
+            if target_idx >= 0:
+                configs[target_idx]['data'] = data
+                configs[target_idx]['ref'] = current_ref
+                st.toast(f"✅ {current_ref} mis à jour !")
+        else:
+             # CREATE NEW
+             new_id = str(uuid.uuid4())
+             new_config = {
+                'id': new_id,
+                'ref': current_ref,
+                'data': data,
+                'config_type': 'Volet Roulant'
+            }
+             if 'project' not in s: s['project'] = {'configs': []}
+             s['project']['configs'].append(new_config)
+             st.toast(f"✅ {current_ref} enregistré !")
+             
+        # RESET
+        keys_vr = [k for k in s.keys() if k.startswith('vr_')]
+        for k in keys_vr: del s[k]
+        
+        s['active_config_id'] = None
+        s['ref_id'] = get_next_ref()
+        s['clean_config_snapshot'] = None
+        st.rerun()
         import uuid
         new_id = str(uuid.uuid4())
         new_ref = get_next_ref()
@@ -3727,20 +4076,41 @@ def generate_svg_volet():
     w = s.get('vr_width', 1000)
     h = s.get('vr_height', 1000)
     
-    # Scale factors
-    scale = 0.3
-    dw = w * scale
-    dh = h * scale
+    h = s.get('vr_height', 1000)
     
-    coffre_h = 150 * scale # Box height visual
-    coulisse_w = 40 * scale # Guide width visual
+    # V76 FIX: Revert to Real Dimensions (remove scale 0.3)
+    # The container now handles the scaling via viewBox
+    dw = w 
+    dh = h 
     
-    # ViewBox
-    # Increased margin to avoid clipping Crank Dimensions (User report: "hors cadre")
-    margin = 80
-    vb_w = dw + (2 * margin)
-    vb_h = dh + (2 * margin)
+    # Adjust visual constants relative to size?
+    # Coffre/Coulisse sizes are physical constants usually (e.g. 150-300mm box)
+    # But let's keep them as visual defaults if not specified.
+    coffre_h = 180  # Default Box 180mm
+    coulisse_w = 50 # Default Guide 50mm
     
+    # Dynamic Font
+    max_dim = max(dw, dh + coffre_h)
+    font_dim = max(16, int(max_dim * 0.025))
+    
+    # V79 FIX for Volet Roulant: Dynamic ViewBox & Proportional Ticks
+
+    # 1. Base Dimensions
+    tick_size = font_dim * 0.6
+    text_offset = font_dim * 1.2
+    
+    # 2. ViewBox Margins (Dynamic) - INCREASED
+    safe_margin = font_dim * 8.0 # Was 4.0 - Doubled to ensure no clipping
+    
+    # Define bounding box including the box (coffre)
+    # Origin is (0,0) for the object (coffre top-left) excluding margins
+    # Object goes from (0,0) to (dw, dh)
+    
+    vb_x = -safe_margin
+    vb_y = -safe_margin
+    vb_w = dw + (safe_margin * 2)
+    vb_h = dh + (safe_margin * 2)
+
     # Helper for Color Mapping
     def get_color_hex(c_name, default="#e0e0e0"):
         if not c_name or c_name == "-": return default
@@ -3751,7 +4121,6 @@ def generate_svg_volet():
             "Noir 2100": "#1a1a1a",
             "Ivoire 1015": "#e6d690",
             "Chêne Doré": "#b08d55",
-            # Fallback for RALs
         }
         return c_map.get(c_name, default)
 
@@ -3759,15 +4128,15 @@ def generate_svg_volet():
     fill_coffre = get_color_hex(s.get('vr_col_coffre'), "#e0e0e0")
     fill_tablier = get_color_hex(s.get('vr_col_tablier'), "#f0f8ff")
     fill_coulisse = get_color_hex(s.get('vr_col_coulisses'), "#ffffff")
-    stroke_lame = get_color_hex(s.get('vr_col_lame_fin'), "#bcd") if s.get('vr_col_lame_fin') != "Autre (RAL)" else "#bcd" # Simple fallback
+    stroke_lame = get_color_hex(s.get('vr_col_lame_fin'), "#bcd") if s.get('vr_col_lame_fin') != "Autre (RAL)" else "#bcd" 
     
     style_coffre = f"fill:{fill_coffre}; stroke:#666; stroke-width:2;"
     style_tablier = f"fill:{fill_tablier}; stroke:#ccc; stroke-width:1;"
-    style_lame = "stroke:#bcd; stroke-width:1;" # Internal slats
+    style_lame = "stroke:#bcd; stroke-width:1;" 
     style_coulisse = f"fill:{fill_coulisse}; stroke:#888; stroke-width:1;"
     
-    # Draw
-    svg = f'<g transform="translate({margin},{margin})">'
+    # Draw Group starting at (0,0) - ViewBox handles the padding
+    svg = f'<g>'
     
     # 1. Tablier (Curtain)
     svg += f'<rect x="{coulisse_w}" y="{coffre_h}" width="{dw - (2*coulisse_w)}" height="{dh - coffre_h}" style="{style_tablier}" />'
@@ -3775,136 +4144,109 @@ def generate_svg_volet():
     # Horizontal Slats Lines
     lame_type = s.get('vr_lame_thick', '40 mm')
     base_slat_mm = 50 if "50" in lame_type else 40
-    slat_h = base_slat_mm * scale # Real scale
+    slat_h = base_slat_mm 
     curr_y = coffre_h + slat_h
-    while curr_y < dh - (20 * scale): # Leave room for bottom slat
+    while curr_y < dh - 20: 
         svg += f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />'
         curr_y += slat_h
         
-    # Lame Finale (Bottom Slat) - colorized
-    svg += f'<rect x="{coulisse_w}" y="{dh - (20*scale)}" width="{dw - (2*coulisse_w)}" height="{20*scale}" fill="{get_color_hex(s.get("vr_col_lame_fin"), "#bcd")}" stroke="#888" />'
+    # Lame Finale
+    svg += f'<rect x="{coulisse_w}" y="{dh - 20}" width="{dw - (2*coulisse_w)}" height="20" fill="{get_color_hex(s.get("vr_col_lame_fin"), "#bcd")}" stroke="#888" />'
 
-    # 2. Coulisses (Guides)
+    # 2. Coulisses
     svg += f'<rect x="0" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Left
     svg += f'<rect x="{dw - coulisse_w}" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Right
     
-    # 3. Coffre (Box)
+    # 3. Coffre
     svg += f'<rect x="0" y="0" width="{dw}" height="{coffre_h}" style="{style_coffre}" />'
     
-    # Solar Panel Visual (If IO SOLAIRE)
+    # Solar Panel
     if s.get('vr_proto') == "IO SOLAIRE":
-        # Draw small dark blue rect
-        # Position right side unless manual override logic added later
         side = s.get('vr_cable_side', 'Droite')
-        sp_w = 100 * scale # Solar Panel Width
-        sp_h = 40 * scale
+        sp_w = 400 # Fixed visual size for now, logic was broken with 'scale'
+        sp_h = 80 
         sp_y = (coffre_h - sp_h) / 2
-        sp_x = (dw - sp_w - (20*scale)) if side == "Droite" else (20*scale)
+        sp_x = (dw - sp_w - 50) if side == "Droite" else 50
         
         svg += f'<rect x="{sp_x}" y="{sp_y}" width="{sp_w}" height="{sp_h}" fill="#2c3e50" stroke="#111" />'
-        # Grid lines for solar look
         svg += f'<line x1="{sp_x + sp_w/2}" y1="{sp_y}" x2="{sp_x + sp_w/2}" y2="{sp_y+sp_h}" stroke="#555" />'
 
-    # Cable Exit Visual (Motor only)
+    # Cable Exit
     if s.get('vr_type') == "Motorisé":
         side = s.get('vr_cable_side', 'Droite')
         cx = dw if side == "Droite" else 0
         cy = coffre_h / 2
-        
-        # Draw a little "squiggly" cable
         d_cable = f"M{cx},{cy} Q{cx+15},{cy} {cx+15},{cy+15} T{cx+15},{cy+30}" if side == "Droite" else f"M{cx},{cy} Q{cx-15},{cy} {cx-15},{cy+15} T{cx-15},{cy+30}"
         svg += f'<path d="{d_cable}" stroke="orange" stroke-width="3" fill="none" />'
         svg += f'<circle cx="{cx}" cy="{cy}" r="3" fill="orange" />'
         
-    # Crank Visual (Manual only)
+    # Crank
     if s.get('vr_type') == "Manuel":
         side = s.get('vr_crank_side', 'Droite')
-        
-        # Position: Offset from guide rail
-        # Guide rail width is coulisse_w
-        # We want it strictly "le long de la coulisse"
-        # Let's put it overlapping the guide slightly or just inside
-        offset = 15 * scale if side == "Droite" else -15 * scale
+        offset = 15 if side == "Droite" else -15 
         cx = (dw - (coulisse_w/2)) if side == "Droite" else (coulisse_w/2)
-        
-        # Start from bottom of box
         cy_top = coffre_h
-        # Parse length
-        try:
-            l_mm = int(s.get('vr_crank_len', '1200'))
-        except:
-            l_mm = 1200
-        
-        # Scale length (visual only, cap it if too long for view?)
-        # Let's use a proportional visual length or just fixed visual logic?
-        # User wants "sa longueur aussi sur le plan" as a dimension. 
-        # Visualization should probably reflect ratio if possible, but let's stick to a reasonable visual representation.
-        l_vis = l_mm * scale
+        try: l_mm = int(s.get('vr_crank_len', '1200'))
+        except: l_mm = 1200
+        l_vis = l_mm 
         cy_bot = cy_top + l_vis
-        
-        # 1. The Crank Rod (Refined: Grey, Thinner but Visible)
-        # Shift slightly outside/inside depending on side to not hide guide totally? 
-        # Let's place it aligned with the outer edge of the guide.
         rod_x = (dw - 5) if side == "Droite" else 5
         
-        # Outer Border (Dark Grey for contrast, slightly thicker)
         svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
         svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
-        
-        # Inner Core (Light Grey/White, thinner)
         svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
         svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
 
-        # 2. Dimension Line for Crank
-        # Offset further out to avoid clash with guide/crank
-        dim_x = rod_x + (50 if side == "Droite" else -50)
+        # Dimension Line for Crank
+        dim_x = rod_x + (font_dim * 3 if side == "Droite" else -(font_dim * 3))
         
-        # Main line
         svg += f'<line x1="{dim_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_bot}" stroke="#444" stroke-width="1" />'
         
-        # Arrow heads
-        # Top (^)
-        svg += f'<path d="M{dim_x-3},{cy_top+5} L{dim_x},{cy_top} L{dim_x+3},{cy_top+5}" fill="none" stroke="#444" />'
-        # Bottom (v)
-        svg += f'<path d="M{dim_x-3},{cy_bot-5} L{dim_x},{cy_bot} L{dim_x+3},{cy_bot-5}" fill="none" stroke="#444" />'
+        # Arrows for Crank
+        ts = tick_size # shorthand
+        svg += f'<path d="M{dim_x-ts*0.5},{cy_top+ts} L{dim_x},{cy_top} L{dim_x+ts*0.5},{cy_top+ts}" fill="none" stroke="#444" />'
+        svg += f'<path d="M{dim_x-ts*0.5},{cy_bot-ts} L{dim_x},{cy_bot} L{dim_x+ts*0.5},{cy_bot-ts}" fill="none" stroke="#444" />'
         
         # Text Label
-        # Rotate text against the line
-        text_x = dim_x + (15 if side == "Droite" else -15)
+        text_x = dim_x + (text_offset if side == "Droite" else -text_offset)
         text_y = cy_top + (l_vis / 2)
-        # Check for collision with bottom measure if rod is long
-        svg += f'<text x="{text_x}" y="{text_y}" text-anchor="middle" transform="rotate(-90, {text_x}, {text_y})" font-family="sans-serif" font-size="10" fill="#444">{l_mm}</text>'
-        
-        # Dashed projection lines (Top only, bottom is obvious)
+        svg += f'<text x="{text_x}" y="{text_y}" text-anchor="middle" transform="rotate(-90, {text_x}, {text_y})" font-family="sans-serif" font-size="{font_dim}" fill="#444">{l_mm}</text>'
         svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_top}" stroke="#ccc" stroke-dasharray="2,2" />'
 
     # Box X cross
     svg += f'<line x1="0" y1="0" x2="{dw}" y2="{coffre_h}" stroke="#ccc" />'
     svg += f'<line x1="0" y1="{coffre_h}" x2="{dw}" y2="0" stroke="#ccc" />'
     
-    # 4. Dimensions Arrows (FIXED)
+    # 4. Dimensions Arrows (FIXED PROPORTIONS)
     # Width (Bottom)
-    svg += f'<line x1="0" y1="{dh + 20}" x2="{dw}" y2="{dh + 20}" stroke="black" />' # Main line
-    # Left Arrow (<)
-    svg += f'<path d="M10,{dh+15} L0,{dh+20} L10,{dh+25}" fill="none" stroke="black" />'
-    # Right Arrow (>)
-    svg += f'<path d="M{dw-10},{dh+15} L{dw},{dh+20} L{dw-10},{dh+25}" fill="none" stroke="black" />'
-    
-    svg += f'<text x="{dw/2}" y="{dh + 40}" text-anchor="middle" font-family="sans-serif" font-size="12">{int(w)} mm</text>'
+    dim_y_w = dh + (font_dim * 3.5) # Pushed down (was 2)
+    svg += f'<line x1="0" y1="{dim_y_w}" x2="{dw}" y2="{dim_y_w}" stroke="black" />'
+    # Width Ticks
+    svg += f'<path d="M{tick_size},{dim_y_w-tick_size} L0,{dim_y_w} L{tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />'
+    svg += f'<path d="M{dw-tick_size},{dim_y_w-tick_size} L{dw},{dim_y_w} L{dw-tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />'
+    # Width Text
+    svg += f'<text x="{dw/2}" y="{dim_y_w - text_offset}" text-anchor="middle" font-family="sans-serif" font-size="{font_dim*1.2}">{int(w)} mm</text>'
     
     # Height (Left)
-    svg += f'<line x1="{-20}" y1="0" x2="{-20}" y2="{dh}" stroke="black" />'
-    # Top Arrow (^)
-    svg += f'<path d="M{-25},10 L{-20},0 L{-15},10" fill="none" stroke="black" />'
-    # Bottom Arrow (v)
-    svg += f'<path d="M{-25},{dh-10} L{-20},{dh} L{-15},{dh-10}" fill="none" stroke="black" />'
+    dim_x_h = -(font_dim * 3.5) # Pushed left (was 2)
+    svg += f'<line x1="{dim_x_h}" y1="0" x2="{dim_x_h}" y2="{dh}" stroke="black" />'
+    # Height Ticks
+    svg += f'<path d="M{dim_x_h-tick_size},{tick_size} L{dim_x_h},0 L{dim_x_h+tick_size},{tick_size}" fill="none" stroke="black" />'
+    svg += f'<path d="M{dim_x_h-tick_size},{dh-tick_size} L{dim_x_h},{dh} L{dim_x_h+tick_size},{dh-tick_size}" fill="none" stroke="black" />'
+    # Height Text
+    svg += f'<text x="{dim_x_h - text_offset}" y="{dh/2}" text-anchor="middle" transform="rotate(-90, {dim_x_h - text_offset}, {dh/2})" font-family="sans-serif" font-size="{font_dim*1.2}">{int(h)} mm</text>'
     
-    svg += f'<text x="{-30}" y="{dh/2}" text-anchor="middle" transform="rotate(-90, {-30}, {dh/2})" font-family="sans-serif" font-size="12">{int(h)} mm</text>'
+    # Projection lines for dimensions
+    # Vertical projections for Width Dim
+    svg += f'<line x1="0" y1="{dh}" x2="0" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />'
+    svg += f'<line x1="{dw}" y1="{dh}" x2="{dw}" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />'
+    # Horizontal projections for Height Dim
+    svg += f'<line x1="0" y1="0" x2="{dim_x_h}" y2="0" stroke="#ccc" stroke-dasharray="4,4" />'
+    svg += f'<line x1="0" y1="{dh}" x2="{dim_x_h}" y2="{dh}" stroke="#ccc" stroke-dasharray="4,4" />'
     
     svg += '</g>'
     
-    # Remove old marker defs since we draw manually
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{svg}</svg>'
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" style="background-color:white;">{svg}</svg>'
 
 def render_html_volet(s, svg_string, logo_b64):
     """Génération HTML pour Volet Roulant"""
@@ -4326,35 +4668,75 @@ def render_vitrage_form():
     c_btn0, c_btn1, c_btn2 = st.columns(3)
     
     # UPDATE
-    if active_id:
-        if c_btn0.button("💾 Mettre à jour", use_container_width=True, key="vit_upd"):
-             data = serialize_vitrage_config()
+    # UPDATE
+    # V75 UPDATE: Consolidated "Enregistrer" Button
+    if c_btn0.button("💾 Enregistrer", use_container_width=True, key="vit_upd", help="Sauvegarder la configuration actuelle"):
+         data = serialize_vitrage_config()
+         
+         if active_id:
+             # UPDATE EXISTING
              update_current_config_in_project(active_id, data, s['vit_ref'])
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
              st.toast(f"✅ {s['vit_ref']} mis à jour !")
              st.rerun()
+         else:
+             # CREATE NEW
+             new_ref = s.get('vit_ref', 'V-01')
+             new_id = add_config_to_project(data, new_ref)
+             
+             # Set as Active
+             st.session_state['active_config_id'] = new_id
+             
+             # Update Snapshot
+             st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+             
+             st.toast(f"✅ {new_ref} enregistré !")
+             st.rerun()
 
-    # ADD & DUPLICATE
-    if c_btn1.button("Ajouter & Dupliquer", use_container_width=True, key="vit_updup"):
+    # DUPLICAT (Save Copy)
+    if c_btn1.button("Dupliquer", use_container_width=True, key="vit_updup", help="Créer une copie"):
         data = serialize_vitrage_config()
         # New Ref
-        new_ref = s.get('vit_ref', 'V-01')
+        current_ref = s.get('vit_ref', 'V-01')
+        new_ref = f"{current_ref} (Copie)"
+        
         new_id = add_config_to_project(data, new_ref)
         s['pending_new_id'] = new_id
         # Auto Increment
         s['pending_ref_id'] = get_next_ref(new_ref)
-        st.toast(f"✅ {new_ref} ajouté !")
+        
+        st.session_state['active_config_id'] = new_id
+        
+        # V76 Fix: Use pending_updates for widget keys
+        if 'pending_updates' not in st.session_state: st.session_state['pending_updates'] = {}
+        st.session_state['pending_updates']['ref_id'] = new_ref
+        
+        st.session_state['clean_config_snapshot'] = get_config_snapshot(data)
+        
+        st.toast(f"✅ Copie créée : {new_ref}")
         st.rerun()
 
-    # ADD & NEW
-    if c_btn2.button("Ajouter & Nouveau", use_container_width=True, key="vit_upnew"):
+    # NOUVEAU (Reset)
+    if c_btn2.button("Nouveau (Reset)", use_container_width=True, key="vit_upnew", help="Sauvegarder et Réinitialiser"):
         data = serialize_vitrage_config()
-        new_ref = s.get('vit_ref', 'V-01')
-        new_id = add_config_to_project(data, new_ref)
-        # s['pending_new_id'] = new_id # No selection needed for reset
-        st.toast(f"✅ {new_ref} enregistré !")
+        current_ref = s.get('vit_ref', 'V-01')
         
+        if active_id:
+            # UPDATE EXISTING
+            update_current_config_in_project(active_id, data, current_ref)
+            st.toast(f"✅ {current_ref} mis à jour !")
+        else:
+             # CREATE NEW
+             new_id = add_config_to_project(data, current_ref)
+             st.toast(f"✅ {current_ref} enregistré !")
+             
         # RESET
         reset_config(rerun=False)
+        s['active_config_id'] = None
+        s['clean_config_snapshot'] = None
         s['pending_ref_id'] = get_next_project_ref()
         st.rerun()
 
@@ -4376,6 +4758,11 @@ def generate_svg_vitrage():
     # 1. Setup Canvas
     w_mm = s.get('vit_width', 1000)
     h_mm = s.get('vit_height', 1000)
+    
+    # V76 FIX: Dynamic Font
+    max_dim = max(w_mm, h_mm)
+    font_dim = max(16, int(max_dim * 0.025))
+
     
     # Layers (Z-Index equivalent via sort)
     # 0: BG, 10: Frame, 20: Glass, 30: Petit Bois/Usi, 40: Dims
@@ -4402,7 +4789,7 @@ def generate_svg_vitrage():
             "avoid": avoid_pt
         })
 
-    # HELPER: Draw Dimension (Low Level)
+    # HELPER: Draw Dimension (Low Level) - V79 Dynamic
     def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
         import math
         d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
@@ -4426,33 +4813,31 @@ def generate_svg_vitrage():
         ax, ay = x1 + nx*offset, y1 + ny*offset
         bx, by = x2 + nx*offset, y2 + ny*offset
         
-        mk_len = 10
+        # PROPORTIONAL MARKERS
+        mk_len = font_dim * 0.5
+        stroke_w = max(1, font_dim * 0.05)
+        
         out = ""
-        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
+        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="{stroke_w}" />'
         
         # Ticks
-        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
-        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
+        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="{stroke_w}" />'
+        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="{stroke_w}" />'
+        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="{stroke_w*0.5}" stroke-dasharray="2,2" />'
+        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="{stroke_w*0.5}" stroke-dasharray="2,2" />'
         
         mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
         
-        # V16 Fix: Text Offset must follow the direction of the Line Offset
-        # If offset is negative, we moved Opposite to Normal. Text must move Opposite too.
-        # This keeps text "Away from the glass" relative to the line.
         sign_off = 1 if offset >= 0 else -1
-        txt_gap = 12 # Reduced to "glue" text to line (12px center-to-line)
+        txt_gap = font_dim * 0.6 
         
         tx = mx_dim + nx * (sign_off * txt_gap)
         ty = my_dim + ny * (sign_off * txt_gap)
         
-        # Logic for Suffix (Hack for specific requirements)
         suffix = ""
         if "Axe" in label_prefix: suffix = " mm"
         
-        # Simple Text (No Halo) -> With Halo
-        out += f'<text x="{tx}" y="{ty}" fill="{color}" font-size="20" font-weight="bold" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})" paint-order="stroke" stroke="white" stroke-width="3">{label_prefix}{val:.0f}{suffix}</text>'
+        out += f'<text x="{tx}" y="{ty}" fill="{color}" font-size="{font_dim}" font-weight="bold" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})" paint-order="stroke" stroke="white" stroke-width="3">{label_prefix}{val:.0f}{suffix}</text>'
         return out
 
     # 2. Logic: Glass Only?
@@ -4461,13 +4846,23 @@ def generate_svg_vitrage():
     mat = s.get('vit_mat', '')
     glass_only = (mat in ["Porte Sécurit", "Vitrage Seul", "Mur"] or s.get('vit_type_mode') == "Panneau")
     
-    # 3. Define Draw Area
-    margin = 300 # Increased to 300 to stop cutting off top dimensions
-    vb_w = w_mm + (margin*2)
-    vb_h = h_mm + (margin*2)
+    # 3. Define Draw Area (Dynamic ViewBox)
+    # Origin is (0,0) inside the SVG, but we use ViewBox to shift margins
+    # The Object (Glass/Frame) starts at (0,0) in our coordinate system
     
-    # Calculate origin
-    x0, y0 = margin, margin
+    # Dynamic Margins for ViewBox - INCREASED AGAIN for Extreme Sizes
+    margin_safe = font_dim * 10.0 
+    
+    x0, y0 = 0, 0 # Object Start
+    
+    # ViewBox definition
+    # Left/Top needs negative margin to show dimensions
+    vb_x = -margin_safe
+    vb_y = -margin_safe
+    # Width/Height extends beyond object size
+    vb_w = w_mm + (margin_safe * 2)
+    vb_h = h_mm + (margin_safe * 2)
+
     
     svg_list = []
     
@@ -4613,7 +5008,7 @@ def generate_svg_vitrage():
 
              svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
              # V16 Polish: Label Outside & Bigger (Font 20)
-             svg_list.append((z_pb, f'<text x="{cx}" y="{cy - (td/2) - 15}" font-size="20" font-weight="bold" fill="red" text-anchor="middle">Ø{td}</text>'))
+             svg_list.append((z_pb, f'<text x="{cx}" y="{cy - (td/2) - 15}" font-size="{font_dim}" font-weight="bold" fill="red" text-anchor="middle">Ø{td}</text>'))
         
         # Encoches
         nb_e = s.get('vit_nb_enc', 0)
@@ -4757,9 +5152,13 @@ def generate_svg_vitrage():
                 py = iy + step_h * (i + 1) - (thick/2)
                 svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
                 if i == 0:
-                    h_gap = step_h
-                    dx_ref = x0 + w_mm + th_outer if not glass_only else x0 + w_mm
-                    draw_dimension_line(svg_list, dx_ref, iy, dx_ref, iy + h_gap, int(h_gap), "", 50, "V", 20, z_dim)
+                     h_gap = step_h
+                     # Anchor to Inner Right but push OUTSIDE Outer Frame
+                     dx_ref = x0 + w_mm + th_outer
+                     # Dynamic Offset and Font Size (V79: Increase offset to be clearly outside)
+                     draw_dimension_line(svg_list, dx_ref, iy, dx_ref, iy + h_gap, int(h_gap), "", font_dim * 4.0, "V", font_dim, z_dim)
+
+
 
         if nb_v > 0:
             step_v = iw / (nb_v + 1)
@@ -4767,8 +5166,10 @@ def generate_svg_vitrage():
                 px = ix + step_v * (i + 1) - (thick/2)
                 svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
                 if i == 0:
-                    w_gap = step_v
-                    draw_dimension_line(svg_list, x0+th_inner, y0-th_outer, x0+th_inner+w_gap, y0-th_outer, int(w_gap), "", -60, "H", 20, z_dim)
+                     w_gap = step_v
+                     # Anchor to Inner Top but push OUTSIDE Outer Frame
+                     draw_dimension_line(svg_list, x0+th_inner, y0-th_outer, x0+th_inner+w_gap, y0-th_outer, int(w_gap), "", -(font_dim * 2.5), "H", font_dim, z_dim)
+
 
     # 6. Global Dimensions (Black/Standard) - RESTORED
     # Axis Calculations - If glass_only, axis is just glass edge
@@ -4784,18 +5185,19 @@ def generate_svg_vitrage():
         axis_bottom = (y0 + h_mm) - (th_inner/2)
     
     # Width (Global)
+    # Width (Global)
     draw_dimension_line(svg_list, 
         axis_left, axis_bottom, 
         axis_right, axis_bottom, 
         int(w_mm), 
-        "", 250, "H", 32, z_dim, leader_fixed_start=axis_bottom)
+        "", font_dim * 3.5, "H", font_dim, z_dim, leader_fixed_start=axis_bottom)
     
     # Height (Global)
     draw_dimension_line(svg_list, 
         axis_left, axis_top, 
         axis_left, axis_bottom, 
         int(h_mm), 
-        "", 250, "V", 32, z_dim, leader_fixed_start=axis_left)
+        "", font_dim * 3.5, "V", font_dim, z_dim, leader_fixed_start=axis_left)
     
     # NO Cleanup of these dims. User wants them.
 
@@ -4804,8 +5206,10 @@ def generate_svg_vitrage():
     
     # Config: Base distance + Step
     # Config: Base distance + Step
-    base_dist = 40 # Reduced to 40 to "glue" small dims (User Request)
-    step_dist = 40 # Reduced step
+    # Config: Base distance + Step
+    # DYNAMIC SPACING
+    base_dist = font_dim * 1.5
+    step_dist = font_dim * 1.5
     
     # Helper to process a bucket
     def render_bucket(edge_name, bucket_list, sign_direction):
@@ -4870,662 +5274,8 @@ def generate_svg_vitrage():
     svg_list.sort(key=lambda x: x[0])
     content = "".join([item[1] for item in svg_list])
     
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
-    # 7. Render
-    svg_list.sort(key=lambda x: x[0])
-    content = "".join([item[1] for item in svg_list])
-    
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
-    """Génère le dessin SVG Vitrage (Style Menuiserie V73) - V7 White + Axis Dims"""
-    s = st.session_state
-    
-    # 1. Setup Canvas
-    w_mm = s.get('vit_width', 1000)
-    h_mm = s.get('vit_height', 1000)
-    
-    # Layers (Z-Index equivalent via sort)
-    # 0: BG, 10: Frame, 20: Glass, 30: Petit Bois/Usi, 40: Dims
-    z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="background-color:white;">{content}</svg>'
 
-    # HELPER: Draw Dimension
-    def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
-        import math
-        d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
-        if d == 0: return ""
-        ux, uy = (x2-x1)/d, (y2-y1)/d
-        nx, ny = -uy, ux # Initial Normal
-        
-        mx, my = (x1+x2)/2, (y1+y2)/2
-        
-        # Auto-Flip if avoid_point provided (Center of glass)
-        if avoid_point:
-            cx, cy = avoid_point
-            # Vector Center -> Midpoint
-            vx, vy = mx - cx, my - cy
-            # Dot product with Normal
-            dot = nx * vx + ny * vy
-            # If dot < 0, Normal points inwards (opposing V). We want it same direction as V (Outwards).
-            if dot < 0:
-                nx, ny = -nx, -ny
-                
-        # Apply Offset
-        ax, ay = x1 + nx*offset, y1 + ny*offset
-        bx, by = x2 + nx*offset, y2 + ny*offset
-        
-        mk_len = 10
-        out = ""
-        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
-        
-        # Ticks (Oriented with Normal now)
-        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        
-        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
-        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
-        
-        mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
-        txt_offset = 15
-        out += f'<text x="{mx_dim + nx*txt_offset}" y="{my_dim + ny*txt_offset}" fill="{color}" font-size="20" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}</text>'
-        return out
-
-    # 2. Logic: Glass Only?
-    glass_only = (s.get('vit_type_mode') == "Verre Seul" or s.get('vit_type_mode') == "Panneau")
-    
-    # 3. Define Draw Area
-    margin = 150
-    vb_w = w_mm + (margin*2)
-    vb_h = h_mm + (margin*2)
-    
-    # Calculate origin (top-left of drawing)
-    x0, y0 = margin, margin
-    
-    svg_list = []
-    
-    # Frame/Glass Rect Logic
-    th_frame = 40 # Generic frame logic
-    th_inner = 0
-    th_outer = 0
-    
-    ix, iy, iw, ih = x0, y0, w_mm, h_mm # Default Inner (Glass)
-    
-    if glass_only:
-        # Just Glass Area
-        svg_list.append((z_outer, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="none" stroke="#ddd" stroke-dasharray="4" />'))
-    else:
-        # Draw Frame (Dormant)
-        # Assuming generic V7 frame style for visualization
-        th_inner = 26
-        th_outer = 14
-        
-        ox, oy = x0 - th_outer, y0 - th_outer
-        ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
-        
-        svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
-
-        # Inner Frame
-        col_stroke = "#AAA"
-        svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
-        
-        ix, iy = x0 + th_inner, y0 + th_inner
-        iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
-        
-        svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
-        
-        # Frame Dims (Grey)
-        svg_list.append((z_dim, draw_dim(x0, y0-10, x0+w_mm, y0-10, w_mm, 30, "#888", "L ")))
-        svg_list.append((z_dim, draw_dim(x0-10, y0, x0-10, y0+h_mm, h_mm, 30, "#888", "H ")))
-
-    # 4. Glass & Shapes
-    g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
-    shape = s.get('vit_shape', 'Rectangulaire')
-    path_d = ""
-    
-    # Center Point for Dimension Orientation (Avoid Point)
-    center_pt = (ix + iw/2, iy + ih/2)
-    
-    if shape == "Rectangulaire":
-        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
-        # Explicit Blue Dims for Rectangle (Outside) with large offset
-        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+iw, iy+ih, iw, 80, "blue", "", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, 80, "blue", "", avoid_point=center_pt)))
-        
-    elif "Forme A1" in shape:
-        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
-        y_tl, y_tr = (iy + ih) - h1, (iy + ih) - h2
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_tr} L {ix},{y_tl} z"
-        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_tl, h1, 80, "red", "H1=", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_tr, h2, 80, "red", "H2=", avoid_point=center_pt)))
-        
-    elif "Forme A2" in shape: # Pan Coupé
-        lx, ly = s.get('vit_sh_lc', 200), s.get('vit_sh_hc', 200)
-        path_d = f"M {ix},{iy} L {ix+iw-lx},{iy} L {ix+iw},{iy+ly} L {ix+iw},{iy+ih} L {ix},{iy+ih} z"
-        svg_list.append((z_dim, draw_dim(ix+iw-lx, iy, ix+iw, iy, lx, 80, "red", "Lx=", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ly, ly, 80, "red", "Ly=", avoid_point=center_pt)))
-        
-    elif "Forme B" in shape:
-        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
-        h3 = s.get('vit_sh_h3', ih)
-        l1 = s.get('vit_sh_l1', iw/2)
-        l2 = s.get('vit_sh_l2', 0)
-        
-        y_l, y_r = (iy + ih) - h1, (iy + ih) - h2
-        y_peak = (iy + ih) - h3
-        
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_r} L {ix+l1+l2},{y_peak} L {ix+l1},{y_peak} L {ix},{y_l} z"
-        
-        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix, y_l, h1, 80, "red", "H1=", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy+ih, ix+iw, y_r, h2, 80, "red", "H2=", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1, y_peak, h3, -20, "red", "H3=", avoid_point=None))) 
-        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+l1, iy+ih, l1, 120, "red", "L1=", avoid_point=center_pt))) 
-        if l2 > 0:
-             svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1+l2, iy+ih, l2, 120, "red", "L2=", avoid_point=center_pt)))
-
-    elif "Forme C" in shape:
-        fleche = s.get('vit_sh_fleche', 0)
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{iy+fleche} Q {ix+(iw/2)},{iy} {ix},{iy+fleche} z"
-        svg_list.append((z_dim, draw_dim(ix+iw/2, iy, ix+iw/2, iy+fleche, fleche, -40, "red", "F=")))
-        
-    elif "Forme D" in shape:
-        rx, ry = iw / 2, ih / 2
-        cx, cy = ix + rx, iy + ry
-        path_d = f"M {cx-rx},{cy} a {rx},{ry} 0 1,0 {2*rx},0 a {rx},{ry} 0 1,0 -{2*rx},0"
-        
-    else: # Default
-        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
-
-    svg_list.append((z_glass, f'<path d="{path_d}" fill="{g_fill}" stroke="#888" stroke-width="2" />'))
-
-    # 5. Machining (Usinage)
-    if s.get('vit_usi_enable'):
-        # Trous
-        nb_t = s.get('vit_nb_trous', 0)
-        for i in range(nb_t):
-             tx = s.get(f"v_t_x_{i}", 0)
-             ty = s.get(f"v_t_y_{i}", 0)
-             td = s.get(f"v_t_d_{i}", 10)
-             # Draw Circle at ix+tx, iy+ty
-             cx, cy = ix + tx, iy + ty
-             svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
-             svg_list.append((z_pb, f'<text x="{cx}" y="{cy}" font-size="10" fill="red" text-anchor="middle" dy="3">Ø{td}</text>'))
-             # Dims Trous (Bucket) - X is Bottom, Y is Left in standard view
-             # BUT: Holes can be anywhere. We map X to bottom/top based on position? 
-             # For robustness, we assume X=Bottom, Y=Left usually.
-             add_smart_dim("bottom", tx, ix, cy, cx, cy, "orange", "X", center_pt)
-             add_smart_dim("left", ty, cx, iy, cx, cy, "orange", "Y", center_pt) 
-        
-        # Encoches
-        nb_e = s.get('vit_nb_enc', 0)
-        for i in range(nb_e):
-             ex = s.get(f"v_e_x_{i}", 0)
-             ey = s.get(f"v_e_y_{i}", 0)
-             ew = s.get(f"v_e_w_{i}", 50)
-             eh = s.get(f"v_e_h_{i}", 50)
-             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="red" stroke-width="1" stroke-dasharray="4" />'))
-
-        # Mickey 101 (With Side Logic)
-        if s.get('vit_mickey_101'):
-            mickey_w, mickey_h = 165, 46
-            side = s.get('vit_mickey_side', 'Gauche')
-            
-            # Position Logic: Notch is FLUSH with edge (Width 165)
-            # Axis (Pivot) is at 65mm from the same edge.
-            
-            if side == "Gauche":
-                 p_start = ix # Flush Left
-                 p_end = ix + mickey_w # Extend Inwards
-                 mx = ix + 65 # Axis
-            else: # Droite
-                 p_start = ix + iw - mickey_w # Flush Right
-                 p_end = ix + iw
-                 mx = ix + iw - 65 # Axis
-            
-            # Draw Function for Notch
-            def draw_mickey(my, is_top):
-                 sign = 1 if is_top else -1
-                 d_path = f"M {p_start},{my} v {sign*mickey_h} h {mickey_w} v -{sign*mickey_h} z"
-                 # Cutout (White)
-                 svg_list.append((z_pb, f'<path d="{d_path}" fill="white" stroke="red" stroke-width="2" />'))
-                 
-                 # Holes Layout centered on Axis (mx)
-                 h1x = mx - 30 
-                 h2x = mx + 30
-                 hy = my + (sign * mickey_h * 0.5)
-                 
-                 svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-                 svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-                 svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text_anchor="middle" paint-order="stroke" stroke="white" stroke-width="3">Enc. 101</text>'))
-                 
-                 # Dim Axis (Smart)
-                 # Dim Axis (Smart Buckets)
-                 edge_axis = "bottom" if not is_top else "top"
-                 
-                 if side == "Gauche":
-                     # From ix to mx
-                     add_smart_dim(edge_axis, 65, ix, my, mx, my, "red", "Axe=", center_pt)
-                 else:
-                     add_smart_dim(edge_axis, 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
-
-                 # Dim Width (Smart Buckets)
-                 add_smart_dim(edge_axis, mickey_w, p_start, my, p_end, my, "red", "", center_pt)
-
-            # Draw Top AND Bottom (User requirement)
-            draw_mickey(iy, True)
-            draw_mickey(iy + ih, False)
-             
-    # 5. Petits Bois
-    if s.get('vit_pb_enable'):
-        nb_h = s.get('vit_pb_hor', 0)
-        nb_v = s.get('vit_pb_vert', 0)
-        thick = s.get('vit_pb_thick', 26)
-        
-        if nb_h > 0:
-            step_h = ih / (nb_h + 1)
-            for i in range(nb_h):
-                py = iy + step_h * (i + 1) - (thick/2)
-                svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
-
-        if nb_v > 0:
-            step_v = iw / (nb_v + 1)
-            for i in range(nb_v):
-                px = ix + step_v * (i + 1) - (thick/2)
-                svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
-
-    # 6. Cleanup Frame Dims if Glass Dims present (Blue/Red present -> Remove Grey)
-    if 'svg_list' in locals() and len(svg_list) > 0:
-         # Filter out any item containing stroke="#888" IF we have Blue/Red dims
-         has_fab_dims = any((item[0] == z_dim and ('blue' in item[1] or 'red' in item[1])) for item in svg_list)
-         if has_fab_dims:
-             svg_list = [item for item in svg_list if not (item[0] == z_dim and '#888' in item[1])]
-
-    # 7. Render
-    svg_list.sort(key=lambda x: x[0])
-    content = "".join([item[1] for item in svg_list])
-    
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
-    """Génère le dessin SVG Vitrage (Style Menuiserie V73) - V7 White + Axis Dims"""
-    s = st.session_state
-    
-    # 1. Setup Canvas
-    w_mm = s.get('vit_width', 1000)
-    h_mm = s.get('vit_height', 1000)
-    
-    # Visual Params
-    th_outer = 50
-    th_inner = 40
-    
-    margin = 500   # Margins increased to accommodate largEST offsets (was 350)
-    offset_top = 50
-    
-    vb_w = w_mm + (margin * 2.5) 
-    vb_h = h_mm + (margin * 2.5)
-    
-    x0 = margin
-    y0 = margin + offset_top
-    
-    svg_list = [] 
-    z_bg, z_outer, z_frame, z_glass, z_pb, z_dim = 0, 5, 10, 20, 30, 40
-
-    # HELPER: Draw Dimension
-    def draw_dim(x1, y1, x2, y2, val, offset=50, color="blue", label_prefix="", avoid_point=None):
-        import math
-        d = math.sqrt((x2-x1)**2 + (y2-y1)**2)
-        if d == 0: return ""
-        ux, uy = (x2-x1)/d, (y2-y1)/d
-        nx, ny = -uy, ux # Initial Normal
-        
-        mx, my = (x1+x2)/2, (y1+y2)/2
-        
-        # Auto-Flip if avoid_point provided (Center of glass)
-        if avoid_point:
-            cx, cy = avoid_point
-            # Vector Center -> Midpoint
-            vx, vy = mx - cx, my - cy
-            # Dot product with Normal
-            dot = nx * vx + ny * vy
-            # If dot < 0, Normal points inwards (opposing V). We want it same direction as V (Outwards).
-            if dot < 0:
-                nx, ny = -nx, -ny
-                
-        # Apply Offset
-        ax, ay = x1 + nx*offset, y1 + ny*offset
-        bx, by = x2 + nx*offset, y2 + ny*offset
-        
-        mk_len = 10
-        out = ""
-        out += f'<line x1="{ax}" y1="{ay}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="1" />'
-        
-        # Ticks (Oriented with Normal now)
-        out += f'<line x1="{ax - ux*mk_len - nx*mk_len}" y1="{ay - uy*mk_len - ny*mk_len}" x2="{ax + ux*mk_len + nx*mk_len}" y2="{ay + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        out += f'<line x1="{bx - ux*mk_len - nx*mk_len}" y1="{by - uy*mk_len - ny*mk_len}" x2="{bx + ux*mk_len + nx*mk_len}" y2="{by + uy*mk_len + ny*mk_len}" stroke="{color}" stroke-width="1" />'
-        
-        out += f'<line x1="{x1}" y1="{y1}" x2="{ax}" y2="{ay}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
-        out += f'<line x1="{x2}" y1="{y2}" x2="{bx}" y2="{by}" stroke="{color}" stroke-width="0.5" stroke-dasharray="2,2" />'
-        
-        mx_dim, my_dim = (ax+bx)/2, (ay+by)/2
-        txt_offset = 15
-        out += f'<text x="{mx_dim + nx*txt_offset}" y="{my_dim + ny*txt_offset}" fill="{color}" font-size="20" text-anchor="middle" dominant-baseline="middle" transform="rotate(0, {mx_dim}, {my_dim})">{label_prefix}{val:.0f}</text>'
-        return out
-
-    # 2. Logic: Glass Only?
-    mat = s.get('vit_mat', '')
-    glass_only = (mat in ["Porte Sécurit", "Vitrage Seul"])
-    
-    # 3. Define Draw Area
-    if glass_only:
-        # No Frame, Glass = Full Size
-        ix, iy = x0, y0
-        iw, ih = w_mm, h_mm
-        # Glass Dims
-        svg_list.append((z_dim, draw_dim(ix, iy, ix+iw, iy, iw, -40, "blue")))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, -40, "blue")))
-    else:
-        # Draw Frame (Standard)
-        ox, oy = x0 - th_outer, y0 - th_outer
-        ow, oh = w_mm + (th_outer*2), h_mm + (th_outer*2)
-        
-        svg_list.append((z_outer, f'<rect x="{ox}" y="{oy}" width="{ow}" height="{oh}" fill="white" stroke="#999" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy}" x2="{x0}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy}" x2="{x0+w_mm}" y2="{y0}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox}" y1="{oy+oh}" x2="{x0}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
-        svg_list.append((z_outer, f'<line x1="{ox+ow}" y1="{oy+oh}" x2="{x0+w_mm}" y2="{y0+h_mm}" stroke="#aaa" stroke-width="1" />'))
-
-        # Inner Frame
-        col_stroke = "#AAA"
-        svg_list.append((z_frame, f'<rect x="{x0}" y="{y0}" width="{w_mm}" height="{h_mm}" fill="white" stroke="{col_stroke}" stroke-width="2" />'))
-        
-        ix, iy = x0 + th_inner, y0 + th_inner
-        iw, ih = w_mm - (th_inner*2), h_mm - (th_inner*2)
-        
-        svg_list.append((z_frame, f'<rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="#555" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0}" x2="{ix}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0}" x2="{ix+iw}" y2="{iy}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0}" y1="{y0+h_mm}" x2="{ix}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
-        svg_list.append((z_frame, f'<line x1="{x0+w_mm}" y1="{y0+h_mm}" x2="{ix+iw}" y2="{iy+ih}" stroke="{col_stroke}" stroke-width="1" />'))
-        
-        # Frame Dims (Grey)
-        svg_list.append((z_dim, draw_dim(x0, y0-10, x0+w_mm, y0-10, w_mm, 30, "#888", "L ")))
-        svg_list.append((z_dim, draw_dim(x0-10, y0, x0-10, y0+h_mm, h_mm, 30, "#888", "H ")))
-
-    # 4. Glass & Shapes
-    g_fill = "#d6eaff" if s.get('vit_type_mode') != "Panneau" else "#eeeeee"
-    shape = s.get('vit_shape', 'Rectangulaire')
-    path_d = ""
-    
-    # Center Point for Dimension Orientation (Avoid Point)
-    center_pt = (ix + iw/2, iy + ih/2)
-    
-    if shape == "Rectangulaire":
-        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
-        # Explicit Blue Dims for Rectangle (Outside)
-        svg_list.append((z_dim, draw_dim(ix, iy+ih, ix+iw, iy+ih, iw, 80, "blue", "", avoid_point=center_pt)))
-        svg_list.append((z_dim, draw_dim(ix+iw, iy, ix+iw, iy+ih, ih, 80, "blue", "", avoid_point=center_pt)))
-    elif "Forme A1" in shape:
-        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
-        y_tl, y_tr = (iy + ih) - h1, (iy + ih) - h2
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_tr} L {ix},{y_tl} z"
-        svg_list.append((z_dim, draw_dim(ix-20, iy+ih, ix-20, y_tl, h1, 80, "red", "H1=")))
-        svg_list.append((z_dim, draw_dim(ix+iw+20, iy+ih, ix+iw+20, y_tr, h2, 80, "red", "H2=")))
-    elif "Forme A2" in shape: # Pan Coupé
-        lx, ly = s.get('vit_sh_lc', 200), s.get('vit_sh_hc', 200)
-        path_d = f"M {ix},{iy} L {ix+iw-lx},{iy} L {ix+iw},{iy+ly} L {ix+iw},{iy+ih} L {ix},{iy+ih} z"
-        svg_list.append((z_dim, draw_dim(ix+iw-lx, iy-10, ix+iw, iy-10, lx, 80, "red", "Lx=")))
-        svg_list.append((z_dim, draw_dim(ix+iw+10, iy, ix+iw+10, iy+ly, ly, 80, "red", "Ly=")))
-    elif "Forme B" in shape:
-        h1, h2 = s.get('vit_sh_h1', ih), s.get('vit_sh_h2', ih)
-        h3 = s.get('vit_sh_h3', ih)
-        l1 = s.get('vit_sh_l1', iw/2)
-        l2 = s.get('vit_sh_l2', 0)
-        
-        y_l, y_r = (iy + ih) - h1, (iy + ih) - h2
-        y_peak = (iy + ih) - h3
-        
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{y_r} L {ix+l1+l2},{y_peak} L {ix+l1},{y_peak} L {ix},{y_l} z"
-        
-        svg_list.append((z_dim, draw_dim(ix-20, iy+ih, ix-20, y_l, h1, 80, "red", "H1=")))
-        svg_list.append((z_dim, draw_dim(ix+iw+20, iy+ih, ix+iw+20, y_r, h2, 80, "red", "H2=")))
-        svg_list.append((z_dim, draw_dim(ix+l1, iy+ih, ix+l1, y_peak, h3, 0, "red", "H3="))) # Center
-        svg_list.append((z_dim, draw_dim(ix, iy+ih+40, ix+l1, iy+ih+40, l1, 40, "red", "L1=")))
-        if l2 > 0:
-             svg_list.append((z_dim, draw_dim(ix+l1, iy+ih+40, ix+l1+l2, iy+ih+40, l2, 40, "red", "L2=")))
-    elif "Forme C" in shape:
-        fleche = s.get('vit_sh_fleche', 0)
-        path_d = f"M {ix},{iy+ih} L {ix+iw},{iy+ih} L {ix+iw},{iy+fleche} Q {ix+(iw/2)},{iy} {ix},{iy+fleche} z"
-        svg_list.append((z_dim, draw_dim(ix+iw/2, iy, ix+iw/2, iy+fleche, fleche, -40, "red", "F=")))
-    elif "Forme D" in shape:
-        rx, ry = iw / 2, ih / 2
-        cx, cy = ix + rx, iy + ry
-        path_d = f"M {cx-rx},{cy} a {rx},{ry} 0 1,0 {2*rx},0 a {rx},{ry} 0 1,0 -{2*rx},0"
-    else: # Default
-        path_d = f"M {ix},{iy} h {iw} v {ih} h -{iw} z"
-
-    svg_list.append((z_glass, f'<path d="{path_d}" fill="{g_fill}" stroke="#888" stroke-width="2" />'))
-
-    # 5. Machining (Usinage)
-    if s.get('vit_usi_enable'):
-        # Trous
-        nb_t = s.get('vit_nb_trous', 0)
-        for i in range(nb_t):
-             tx = s.get(f"v_t_x_{i}", 0)
-             ty = s.get(f"v_t_y_{i}", 0)
-             td = s.get(f"v_t_d_{i}", 10)
-             # Draw Circle at ix+tx, iy+ty
-             cx, cy = ix + tx, iy + ty
-             svg_list.append((z_pb, f'<circle cx="{cx}" cy="{cy}" r="{td/2}" fill="white" stroke="red" stroke-width="1" />'))
-             svg_list.append((z_pb, f'<text x="{cx}" y="{cy}" font-size="10" fill="red" text-anchor="middle" dy="3">Ø{td}</text>'))
-             # Dims Position Hole (Avoid Center)
-             svg_list.append((z_dim, draw_dim(ix, cy, cx, cy, tx, 80, "orange", "X", avoid_point=center_pt)))
-             svg_list.append((z_dim, draw_dim(cx, iy, cx, cy, ty, 80, "orange", "Y", avoid_point=center_pt))) 
-        
-        # Encoches
-        nb_e = s.get('vit_nb_enc', 0)
-        for i in range(nb_e):
-             ex = s.get(f"v_e_x_{i}", 0)
-             ey = s.get(f"v_e_y_{i}", 0)
-             ew = s.get(f"v_e_w_{i}", 50)
-             eh = s.get(f"v_e_h_{i}", 50)
-             svg_list.append((z_pb, f'<rect x="{ix+ex}" y="{iy+ey}" width="{ew}" height="{eh}" fill="none" stroke="purple" stroke-width="1" stroke-dasharray="4" />'))
-             # Dims for Standard Notches (Smart Buckets) - VIOLET
-             
-             # X Position (ix to ix+ex)
-             add_smart_dim("bottom", ex, ix, iy+ih, ix+ex, iy+ih, "purple", "X", center_pt)
-             # Width (ix+ex to ix+ex+ew)
-             add_smart_dim("bottom", ew, ix+ex, iy+ih, ix+ex+ew, iy+ih, "purple", "L", center_pt)
-             
-             # Y Position 
-             add_smart_dim("left", ey, ix, iy, ix, iy+ey, "purple", "Y", center_pt)
-             # Height
-             add_smart_dim("left", eh, ix, iy+ey, ix, iy+ey+eh, "purple", "H", center_pt)
-
-        # Mickey 101 (With Side Logic)
-        mickey_w, mickey_h = 165, 46
-        # hole_offset = 65 # Unused, we align axis
-        side = s.get('vit_mickey_side', 'Gauche')
-        
-        # Axis Position (Pivot Axis)
-        if side == "Gauche":
-             mx = ix + 65
-        else: # Droite
-             mx = ix + iw - 65
-        
-        # Draw Function for Notch
-        def draw_mickey(my, is_top):
-             # Draw Notch Centered on Axis
-             p_start = mx - (mickey_w / 2)
-             p_end = mx + (mickey_w / 2)
-             
-             sign = 1 if is_top else -1
-             d_path = f"M {p_start},{my} v {sign*mickey_h} h {mickey_w} v -{sign*mickey_h} z"
-             
-             svg_list.append((z_pb, f'<path d="{d_path}" fill="white" stroke="red" stroke-width="2" />'))
-             
-             # Holes Layout centered on mx
-             h1x = mx - 30 
-             h2x = mx + 30
-             hy = my + (sign * mickey_h * 0.5)
-             
-             svg_list.append((z_pb, f'<circle cx="{h1x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-             svg_list.append((z_pb, f'<circle cx="{h2x}" cy="{hy}" r="6" fill="white" stroke="red" />'))
-             svg_list.append((z_pb, f'<text x="{mx}" y="{my + sign*70}" font-size="16" fill="red" text-anchor="middle" paint-order="stroke" stroke="white" stroke-width="3">Enc. 101</text>'))
-              
-             # Axis (Smart Buckets)
-             edge_axis = "bottom" if not is_top else "top"
-             
-             if side == "Gauche":
-                 # From ix to mx (Axis)
-                 if not is_top: # Bottom Edge
-                     add_smart_dim("bottom", 65, ix, my, mx, my, "red", "Axe=", center_pt)
-                 else:
-                     add_smart_dim("top", 65, ix, my, mx, my, "red", "Axe=", center_pt)
-             else:
-                 # From ix+iw to mx
-                 if not is_top:
-                     add_smart_dim("bottom", 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
-                 else:
-                     add_smart_dim("top", 65, ix+iw, my, mx, my, "red", "Axe=", center_pt)
-
-             # Width (Smart Buckets)
-             if not is_top:
-                 add_smart_dim("bottom", mickey_w, p_start, my, p_end, my, "red", "", center_pt)
-             else:
-                 add_smart_dim("top", mickey_w, p_start, my, p_end, my, "red", "", center_pt)
-
-        if s.get('vit_mickey_haut'):
-             draw_mickey(iy, True)
-
-        if s.get('vit_mickey_bas'):
-             draw_mickey(iy + ih, False)
-             
-    # 6. Cleanup Frame Dims if Shape Dims present (Blue/Red present -> Remove Grey)
-    if shape != "Rectangulaire":
-         # Remove generic dims (z_dim items with #888 stroke)
-         svg_list = [item for item in svg_list if not (item[0] == z_dim and 'stroke="#888"' in item[1])]
-
-    
-    # 5. Petits Bois
-    if s.get('vit_pb_enable'):
-        nb_h = s.get('vit_pb_hor', 0)
-        nb_v = s.get('vit_pb_vert', 0)
-        thick = s.get('vit_pb_thick', 26)
-        
-        if nb_h > 0:
-            step_h = ih / (nb_h + 1)
-            for i in range(nb_h):
-                py = iy + step_h * (i + 1) - (thick/2)
-                svg_list.append((z_pb, f'<rect x="{ix}" y="{py}" width="{iw}" height="{thick}" fill="white" stroke="#ccc" />'))
-                if i == 0:
-                     h_gap = step_h
-                     # Anchor to Inner Right but push OUTSIDE Outer Frame
-                     dx_ref = x0 + w_mm + th_outer
-                     draw_dimension_line(svg_list, dx_ref, iy, dx_ref, iy + h_gap, int(h_gap), "", 50, "V", 20, z_dim)
-
-        if nb_v > 0:
-            step_v = iw / (nb_v + 1)
-            for i in range(nb_v):
-                px = ix + step_v * (i + 1) - (thick/2)
-                svg_list.append((z_pb, f'<rect x="{px}" y="{iy}" width="{thick}" height="{ih}" fill="white" stroke="#ccc" />'))
-                if i == 0:
-                     w_gap = step_v
-                     # Anchor to Inner Top but push OUTSIDE Outer Frame
-                     draw_dimension_line(svg_list, x0+th_inner, y0-th_outer, x0+th_inner+w_gap, y0-th_outer, int(w_gap), "", -60, "H", 20, z_dim)
-
-    # 6. Global Dimensions (V7 Axis Centered)
-    
-    # Axis Calculations (Middle of Dormant)
-    axis_left = x0 + (th_inner/2)
-    axis_right = (x0 + w_mm) - (th_inner/2)
-    axis_top = y0 + (th_inner/2)
-    axis_bottom = (y0 + h_mm) - (th_inner/2)
-    
-    # Width (Bottom) - Show Global Width but anchor leaders to Axis
-    draw_dimension_line(svg_list, 
-        axis_left, axis_bottom, 
-        axis_right, axis_bottom, 
-        int(w_mm), 
-        "", 300, "H", 32, z_dim, leader_fixed_start=axis_bottom)
-    
-    # Height (LEFT SIDE) - Show Global Height but anchor leaders to Axis
-    draw_dimension_line(svg_list, 
-        axis_left, axis_top, 
-        axis_left, axis_bottom, 
-        int(h_mm), 
-        "", 320, "V", 32, z_dim, leader_fixed_start=axis_left)
-    
-    # 6.5 Render Smart Dims
-    # Process Buckets
-    
-    # Config: Base distance + Step
-    # Config: Base distance + Step
-    base_dist = 40
-    step_dist = 40
-    
-    # Helper to process a bucket
-    def render_bucket(edge_name, bucket_list, sign_direction):
-        if not bucket_list: return
-        
-        # 1. Unique Values & Sort
-        try:
-             vals = []
-             for b in bucket_list:
-                 try:
-                     vals.append(float(b['val']))
-                 except:
-                     pass
-             unique_vals = sorted(list(set(vals)))
-        except:
-             unique_vals = sorted(list(set([b['val'] for b in bucket_list])))
-        
-        # 2. Assign Rank Map
-        val_rank = {v: i for i, v in enumerate(unique_vals)}
-        
-        # 3. Draw
-        for item in bucket_list:
-            v_orig = item['val']
-            # Try to match float key
-            try:
-                v = float(v_orig)
-            except:
-                v = v_orig
-            
-            rank = val_rank.get(v, len(unique_vals))
-            pts = item['pts']
-
-            # NORMALIZE VECTORS
-            x1, y1, x2, y2 = pts
-            if abs(x1 - x2) < 0.1: # Vertical
-                # Force Bottom -> Top (y1 > y2)
-                if y1 < y2:
-                    x1, y1, x2, y2 = x2, y2, x1, y1
-            else: # Horizontal
-                # Force Left -> Right (x1 < x2)
-                if x1 > x2:
-                    x1, y1, x2, y2 = x2, y2, x1, y1
-
-            # Calculate Offset
-            scalar_off = (base_dist + (rank * step_dist))
-            final_off = scalar_off * sign_direction
-            
-            svg_list.append((z_dim, draw_dim(x1, y1, x2, y2, v, final_off, item['color'], item['label'], item['avoid'])))
-
-    render_bucket("bottom", dim_buckets["bottom"], 1)
-    render_bucket("top", dim_buckets["top"], -1)
-    render_bucket("left", dim_buckets["left"], -1)
-    render_bucket("right", dim_buckets["right"], 1)
-    render_bucket("left", dim_buckets["left"], -1)
-    render_bucket("right", dim_buckets["right"], -1)
-
-    # 7. Render
-    svg_list.sort(key=lambda x: x[0])
-    content = "".join([item[1] for item in svg_list])
-    
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {vb_h}" style="background-color:white;">{content}</svg>'
 
 
 def render_html_vitrage(s, svg_string, logo_b64):
@@ -5582,66 +5332,131 @@ def render_html_vitrage(s, svg_string, logo_b64):
         return str(res)
 
     vit_resume = reconstruct_vit_string(s)
-
-    style = """<style> 
-        body { font-family: 'Helvetica', sans-serif; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; font-size: 12px; } 
-        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; } 
-        .section-block { margin-top: 15px; page-break-inside: avoid; } 
-        h1 { font-size: 24px; margin: 0; }
-        h2 { font-size: 14px; margin: 5px 0 0 0; color: #555; }
-        h3 { border-left: 4px solid #3498db; padding-left: 8px; color: #2c3e50; font-size: 14px; margin: 0 0 10px 0; } 
-        .panel { background: #fdfdfd; padding: 10px; border: 1px solid #eee; } 
-        table { width: 100%; border-collapse: collapse; font-size: 11px; } 
-        td { padding: 6px; border-bottom: 1px dotted #ccc; } 
-        .label { font-weight: bold; width: 35%; color: #444; } 
-        @media print { body { margin: 10mm; } }
-    </style>"""
     
-    logo_html = f'<img src="data:image/png;base64,{logo_b64}" style="max-height:80px;">' if logo_b64 else ""
+    # V75 ROBUSTNESS: Use the same styles as Menuiserie
+    css = """
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+        body { font-family: 'Roboto', sans-serif; -webkit-print-color-adjust: exact; padding: 0; margin: 0; background-color: #fff; color: #333; }
+        
+        .page-container { 
+            max-width: 210mm; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 3px solid #2c3e50; padding-bottom: 15px; }
+        .header-left img { max-height: 70px; width: auto; }
+        .header-left .subtitle { color: #3498db; font-size: 14px; margin-top: 5px; font-weight: 400; }
+        
+        .header-right { text-align: right; padding-right: 5px; }
+        .header-right .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .header-right .ref { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 2px; line-height: 1; }
+        .header-right .date { font-size: 11px; color: #666; }
+
+        /* STACKED LAYOUT (Sections) */
+        .section-block { margin-bottom: 25px; break-inside: avoid; }
+        
+        /* HEADINGS */
+        h3 { 
+            font-size: 15px; color: #2c3e50; margin: 0 0 12px 0; 
+            border-left: 5px solid #3498db; padding-left: 10px; 
+            line-height: 1.2; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        
+        /* PANELS */
+        .panel { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 4px; font-size: 11px; }
+        .panel-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dotted #ccc; }
+        .panel-row:last-child { border-bottom: none; }
+        .panel-row .lbl { font-weight: bold; color: #444; width: 40%; }
+        .panel-row .val { font-weight: normal; color: #000; text-align: right; width: 60%; }
+        
+        /* ZONES TABLE (Full Width) */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 5px; }
+        th { background: #cfd8dc; color: #2c3e50; padding: 6px; text-align: left; text-transform: uppercase; font-size: 10px; }
+        td { border-bottom: 1px solid #eee; padding: 8px 12px; color: #333; line-height: 1.4; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+
+        /* BOTTOM SECTION (PLAN) */
+        .visual-box {
+            border: none; margin-top: 20px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            position: relative;
+            width: 100%; height: 600px; /* Reduced height for Vitrage to fit page */
+            page-break-inside: avoid;
+        }
+        .visual-box svg { height: 100%; width: auto; max-width: 98%; }
+        
+        .footer { 
+            position: fixed; bottom: 10mm; left: 0; right: 0;
+            font-size: 9px; color: #999; text-align: center; 
+        }
+
+        @media print {
+            @page { size: A4; margin: 12mm; }
+            body { padding: 0; background: white; -webkit-print-color-adjust: exact; }
+            .page-container { margin: 0; padding: 0; box-shadow: none; max-width: none; width: 100%; }
+            .no-print { display: none; }
+            h3 { break-after: avoid; }
+        }
+    </style>
+    """
+    
+    logo_html = f'<img src="data:image/png;base64,{logo_b64}">' if logo_b64 else ""
+
+    import datetime
 
     html = f"""
+    <!DOCTYPE html>
     <html>
-    <head>{style}</head>
+    <head>{css}</head>
     <body>
-        <div class="header">
-            <div>
-                <h1 style="margin:0;">Fiche Vitrage (V11)</h1>
-                <h2 style="margin:5px 0 0 0; color:#555;">Ref: {s.get('vit_ref', 'V-??')}</h2>
+        <div class="page-container">
+            <!-- HEADER -->
+            <div class="header">
+                <div class="header-left">
+                    {logo_html}
+                    <div class="subtitle">Fiche Vitrage</div>
+                </div>
+                <div class="header-right">
+                    <div class="label">RÉFÉRENCE</div>
+                    <div class="ref">{s.get('vit_ref', 'V-??')}</div>
+                    <div class="date">{datetime.datetime.now().strftime('%d/%m/%Y')}</div>
+                </div>
             </div>
-            <div>{logo_html}</div>
-        </div>
-        
-        <div class="section-block">
-            <h3>Caractéristiques</h3>
-            <div class="panel">
-                <table>
-                    <tr><td class="label">Quantité</td><td>{s.get('vit_qte', 1)}</td></tr>
-                    <tr><td class="label">Matériau</td><td>{s.get('vit_mat')}</td></tr>
-                    <tr><td class="label">Type Châssis</td><td>{s.get('vit_type_chassis')}</td></tr>
-                    <tr><td class="label">Dimensions</td><td>{s.get('vit_width')} x {s.get('vit_height')} mm</td></tr>
-                    <tr><td class="label">H. Bas</td><td>{s.get('vit_h_bas', 0)} mm</td></tr>
-                    <tr><td class="label">Type Côtes</td><td>{s.get('vit_dim_type')}</td></tr>
-                    <tr><td class="label">Verre</td><td>{vit_resume}</td></tr>
-                    <tr><td class="label">H. Bas Verre</td><td>{s.get('vit_h_bas')} mm</td></tr>
-                </table>
+            
+            <div class="section-block">
+                <h3>Caractéristiques</h3>
+                <div class="panel">
+                    <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('vit_qte', 1)}</span></div>
+                    <div class="panel-row"><span class="lbl">Matériau</span> <span class="val">{s.get('vit_mat')}</span></div>
+                    <div class="panel-row"><span class="lbl">Type Châssis</span> <span class="val">{s.get('vit_type_chassis')}</span></div>
+                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('vit_width')} x {s.get('vit_height')} mm</span></div>
+                    <div class="panel-row"><span class="lbl">H. Bas</span> <span class="val">{s.get('vit_h_bas', 0)} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Type Côtes</span> <span class="val">{s.get('vit_dim_type')}</span></div>
+                    <div class="panel-row"><span class="lbl">Verre</span> <span class="val">{vit_resume}</span></div>
+                    <div class="panel-row"><span class="lbl">H. Bas Verre</span> <span class="val">{s.get('vit_h_bas')} mm</span></div>
+                </div>
             </div>
-        </div>
-        
-        <div class="section-block">
-            <h3>Plan Technique</h3>
-            <div style="text-align:center; padding: 20px;">
-                {svg_string}
+            
+            <div class="section-block">
+                <h3>Plan Technique</h3>
+                <div class="visual-box">
+                    {svg_string}
+                </div>
             </div>
-        </div>
-        
-        {obs_html}
-        
-        <div style="position: fixed; bottom: 0; width: 100%; text-align: center; font-size: 10px; color: #aaa; background: white; padding: 10px;">
-            Document généré automatiquement - Miroiterie Yerroise
+            
+            {obs_html}
+            
+            <div class="footer">
+                Document généré automatiquement - Miroiterie Yerroise
+            </div>
         </div>
     </body>
     </html>
     """
+
     return html
 
 
@@ -5902,7 +5717,10 @@ with c_preview:
         # 1. PLAN TECHNIQUE
         try:
             svg_output = generate_svg_v73()
-            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+            # V76 FIX: Constrained Visualization Container
+            style_container = 'width:100%; height:70vh; max-height:800px; border:1px solid #ddd; background:white; display:flex; align-items:center; justify-content:center; overflow:hidden;'
+            svg_display = svg_output.replace('<svg ', '<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" ')
+            st.markdown(f'<div style="{style_container}">{svg_display}</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Erreur SVG: {e}")
             import traceback
@@ -6020,7 +5838,10 @@ with c_preview:
         # 1. PLAN TECHNIQUE VOLET
         try:
             svg_output = generate_svg_volet()
-            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+            # V76 FIX: Constrained Visualization Container
+            style_container = 'width:100%; height:70vh; max-height:800px; border:1px solid #ddd; background:white; display:flex; align-items:center; justify-content:center; overflow:hidden;'
+            svg_display = svg_output.replace('<svg ', '<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" ')
+            st.markdown(f'<div style="{style_container}">{svg_display}</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Erreur SVG Volet: {e}")
         
@@ -6069,7 +5890,10 @@ with c_preview:
         # 1. VISUALISATION
         try:
             svg_output = generate_svg_vitrage()
-            st.markdown(f"<div>{svg_output}</div>", unsafe_allow_html=True)
+            # V76 FIX: Constrained Visualization Container
+            style_container = 'width:100%; height:70vh; max-height:800px; border:1px solid #ddd; background:white; display:flex; align-items:center; justify-content:center; overflow:hidden;'
+            svg_display = svg_output.replace('<svg ', '<svg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" ')
+            st.markdown(f'<div style="{style_container}">{svg_display}</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Erreur SVG Vitrage: {e}")
         
@@ -6106,6 +5930,7 @@ with c_preview:
                          ty_i = str(s.get('vit_type_int','Clair'))
                          st_i = f" {ty_i}" if ty_i != "Clair" else ""
                          gaz = str(s.get('vit_gaz','Argon')).upper()
+
                          inter = str(s.get('vit_intercalaire','Alu')).upper()
                          res_ui = f"Vit. {ep_e}{st_e}{sf_e} / {ep_a} / {ep_i}{st_i}{sf_i} - {inter} + GAZ {gaz}"
                      elif vt_mode == "Simple Vitrage":
