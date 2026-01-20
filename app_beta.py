@@ -3956,7 +3956,6 @@ def render_volet_form():
     # 2. Ajouter & Dupliquer
     # 2. Dupliquer (Save Copy)
     if c_btn1.button("Dupliquer", use_container_width=True, help="Créer une copie"):
-        import uuid
         new_id = str(uuid.uuid4())
         
         current_ref = s.get('ref_id', 'VR-01')
@@ -4021,7 +4020,7 @@ def render_volet_form():
         s['ref_id'] = get_next_ref()
         s['clean_config_snapshot'] = None
         st.rerun()
-        import uuid
+
         new_id = str(uuid.uuid4())
         new_ref = get_next_ref()
         
