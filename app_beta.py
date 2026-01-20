@@ -544,6 +544,8 @@ def serialize_config():
         'is_appui_rap', 'width_appui', 'col_in', 'col_ex',
         'width_dorm', 'height_dorm', 'h_allege',
         'vr_enable', 'vr_h', 'vr_g', 'struct_mode', 'zone_tree',
+        'men_w_tab_ex', 'men_h_tab_ex',
+        'vr_add_winding',
         'men_obs'
     ]
     
@@ -3325,20 +3327,39 @@ def render_menuiserie_form():
 
     # --- SECTION 3 : DIMENSIONS ---
     with st.expander("📐 3. Dimensions & VR", expanded=False):
-        # New Dimensions Type Dropdown
-        dim_type = st.selectbox("Type de Côtes", ["Côtes fabrication", "Côtes passage", "Côtes tableau"], key="dim_type")
+        # New Dimensions Type Dropdown (Removed "Côtes tableau")
+        dim_opts = ["Côtes fabrication", "Côtes passage", "Côtes dos de dormant"]
+        # Handle Legacy Value if it was set to Tableau
+        curr_dim = st.session_state.get('dim_type', "Côtes dos de dormant")
+        if curr_dim == "Côtes tableau": 
+             curr_dim = "Côtes fabrication"
+             
+        if curr_dim not in dim_opts: curr_dim = "Côtes dos de dormant"
+
+        dim_type = st.selectbox("Type de Côtes", dim_opts, index=dim_opts.index(curr_dim), key="dim_type")
         c3, c4 = st.columns(2)
         
-        # Libellé dynamique pour la Hauteur
-        lbl_hauteur = "Hauteur Rejingo" if is_appui_rap else "H. Dos Dormant"
-        
-        l_dos_dormant = c3.number_input("L. Dos Dormant", 300, 5000, 1200, 10, key="width_dorm")
-        h_dos_dormant = c4.number_input(lbl_hauteur, 300, 5000, 1400, 10, help="Hauteur totale incluant le coffre", key="height_dorm")
+        # Determine labels based on selection
+        lbl_w = "Largeur"
+        lbl_h = "Hauteur"
+        if "fabrication" in dim_type: lbl_w += " (Fab)"; lbl_h += " (Fab)"
+        elif "passage" in dim_type: lbl_w += " (Passage)"; lbl_h += " (Passage)"
+        else: lbl_w += " (Dos de Dormant)"; lbl_h += " (Dos de Dormant)"
+
+        l_dos_dormant = c3.number_input(f"{lbl_w} (mm)", 100, 5000, 1000, step=10, key="width_dorm")
+        h_dos_dormant = c4.number_input(f"{lbl_h} (mm)", 100, 5000, 1400, step=10, help="Hauteur totale incluant le coffre", key="height_dorm")
         
         # Hauteur d'Allège
         h_allege = st.number_input("Hauteur Allège", 0, 2500, 900, step=10, key="h_allege")
 
         vr_opt = st.toggle("Volet Roulant", False, key="vr_enable")
+        
+        # NOUVEAU: Côtes Tableau Extérieur (Sous VR)
+        st.markdown("**(Optionnel) Côtes Tableau Extérieur**")
+        c_te1, c_te2 = st.columns(2)
+        st.session_state['men_w_tab_ex'] = c_te1.number_input("Largeur Tab. Ext.", value=st.session_state.get('men_w_tab_ex', 0), step=10, key="men_w_ex_in")
+        st.session_state['men_h_tab_ex'] = c_te2.number_input("Hauteur Tab. Ext.", value=st.session_state.get('men_h_tab_ex', 0), step=10, key="men_h_ex_in")
+        
         h_vr = 0
         vr_grille = False
         if vr_opt:
@@ -3764,11 +3785,22 @@ def render_volet_form():
         with c_qte:
              s['vr_qte'] = st.number_input("Qté", value=s.get('vr_qte', 1), min_value=1, step=1, key="vr_qte_in")
 
+    # 1.5 Type de Volet (NOUVEAU)
+    with st.expander("🏗️ Type de Volet", expanded=True):
+        type_opts = ["Coffre rénovation", "Coffre traditionnel en bois", "Coffre Bloc baie", "Coffre titan extérieur"]
+        s['vr_type_coffre'] = st.selectbox("Type de Coffre", type_opts, index=0, key="vr_type_c_sel")
+
     # 2. Dimensions
     with st.expander("📐 Dimensions", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
-            s['vr_dim_type'] = st.selectbox("Type de côtes", ["Côtes Tableau", "Côtes dos de coulisses"], index=0 if s.get('vr_dim_type') == "Côtes Tableau" else 1, key="vr_dim_sel")
+            dim_opts = ["Côtes Tableau", "Côtes dos de coulisses", "Dimensions du tablier"]
+            
+            # Smart Index Logic
+            curr_dim = s.get('vr_dim_type', "Côtes Tableau")
+            if curr_dim not in dim_opts: curr_dim = "Côtes Tableau"
+            
+            s['vr_dim_type'] = st.selectbox("Type de côtes", dim_opts, index=dim_opts.index(curr_dim), key="vr_dim_sel")
         
         c_w, c_h = st.columns(2)
         with c_w:
@@ -3777,6 +3809,10 @@ def render_volet_form():
             s['vr_height'] = st.number_input("Hauteur (mm)", value=s.get('vr_height', 1000), step=10, key="vr_h_in")
             
         # Qte moved to header
+        
+        # Option Enroulement
+        st.write("") # Spacer
+        s['vr_add_winding'] = st.checkbox("Ajouter enroulement sur la hauteur", value=s.get('vr_add_winding', False), key="vr_add_winding_chk")
     
     # 3. Configuration Lames & Options
     with st.expander("🛠️ 3. Configuration Lames & Options", expanded=False):
@@ -4123,6 +4159,10 @@ def generate_svg_volet():
         }
         return c_map.get(c_name, default)
 
+    # Local Helper for Rectangle (Returns String) - Fixes conflict with global draw_rect
+    def draw_rect(x, y, w, h, fill, stroke="none", sw=1):
+        return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{fill}" stroke="{stroke}" stroke-width="{sw}" />'
+
     # Styles with dynamic colors
     fill_coffre = get_color_hex(s.get('vr_col_coffre'), "#e0e0e0")
     fill_tablier = get_color_hex(s.get('vr_col_tablier'), "#f0f8ff")
@@ -4134,41 +4174,123 @@ def generate_svg_volet():
     style_lame = "stroke:#bcd; stroke-width:1;" 
     style_coulisse = f"fill:{fill_coulisse}; stroke:#888; stroke-width:1;"
     
-    # Draw Group starting at (0,0) - ViewBox handles the padding
-    svg = f'<g>'
-    
-    # 1. Tablier (Curtain)
-    svg += f'<rect x="{coulisse_w}" y="{coffre_h}" width="{dw - (2*coulisse_w)}" height="{dh - coffre_h}" style="{style_tablier}" />'
-    
-    # Horizontal Slats Lines
-    lame_type = s.get('vr_lame_thick', '40 mm')
-    base_slat_mm = 50 if "50" in lame_type else 40
-    slat_h = base_slat_mm 
-    curr_y = coffre_h + slat_h
-    while curr_y < dh - 20: 
-        svg += f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />'
-        curr_y += slat_h
-        
-    # Lame Finale
-    svg += f'<rect x="{coulisse_w}" y="{dh - 20}" width="{dw - (2*coulisse_w)}" height="20" fill="{get_color_hex(s.get("vr_col_lame_fin"), "#bcd")}" stroke="#888" />'
+    # Type of Visualization
+    vr_type = s.get('vr_type_coffre', 'Coffre rénovation')
+    is_axe_view = vr_type in ["Coffre traditionnel en bois", "Coffre titan extérieur"]
 
-    # 2. Coulisses
-    svg += f'<rect x="0" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Left
-    svg += f'<rect x="{dw - coulisse_w}" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />' # Right
+    # Draw Group starting at (0,0) - ViewBox handles the padding
+    # Draw Group starting at (0,0) - ViewBox handles the padding
+    svg_parts = []
+    svg_parts.append(f'<g>')
     
-    # 3. Coffre
-    svg += f'<rect x="0" y="0" width="{dw}" height="{coffre_h}" style="{style_coffre}" />'
+    # 1. COFFRE / AXE
+    # 1. COFFRE / AXE / TABLIER / COULISSES (Layering depends on view type)
+    if is_axe_view:
+        # --- AXIS VIEW (Tube + Flasques) ---
+        axe_h = 50 # Diameter of the tube visual - Reduced from 80
+        axe_y = 50 # Offset from top
+        axe_mid_y = axe_y + (axe_h / 2) # 50 + 25 = 75
+        
+        # A. TABLIER (Background - Starts at middle of tube)
+        y_tablier = axe_mid_y
+        h_tablier_vis = dh - y_tablier
+        
+        # Tablier Background (Restored Color Logic)
+        svg_parts.append(draw_rect(coulisse_w, y_tablier, dw - (2*coulisse_w), h_tablier_vis, fill_tablier, stroke="#ccc"))
+        
+        # Horizontal Slats Lines
+        lame_type = s.get('vr_lame_thick', '40 mm')
+        slat_h = 50 if "50" in lame_type else 40
+        curr_y = y_tablier + slat_h
+        while curr_y < dh - 20: 
+            svg_parts.append(f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />')
+            curr_y += slat_h
+
+        # Lame Finale
+        svg_parts.append(draw_rect(coulisse_w, dh - 20, dw - (2*coulisse_w), 20, get_color_hex(s.get("vr_col_lame_fin"), "#bcd"), stroke="#888"))
+
+        # B. COULISSES (Guides - Start below brackets?)
+        # Let's assume brackets are ~150 tall, guides start there.
+        c_start_y = 150
+        c_h = dh - c_start_y
+        svg_parts.append(draw_rect(0, c_start_y, coulisse_w, c_h, fill_coulisse, stroke="#888")) # Left
+        svg_parts.append(draw_rect(dw-coulisse_w, c_start_y, coulisse_w, c_h, fill_coulisse, stroke="#888")) # Right
+
+        # C. TUBE / AXIS (Foreground)
+        # Left Flasque (Bracket)
+        svg_parts.append(draw_rect(0, 0, 10, 150, "#888"))
+        # Right Flasque (Bracket)
+        svg_parts.append(draw_rect(dw-10, 0, 10, 150, "#888"))
+        
+        # Tube (Cylinder) - BOTTOM HALF ONLY (Plain Tube)
+        # Top half (axe_y to axe_mid_y) is covered by rolled slats
+        # Bottom half (axe_mid_y to axe_y + axe_h) is visible tube
+        
+        # 1. ROLLED SLATS on TOP HALF (axe_y to axe_mid_y)
+        # Draw background for rolled part (same width as tablier)
+        roll_h = axe_mid_y - axe_y
+        svg_parts.append(draw_rect(coulisse_w, axe_y, dw-(2*coulisse_w), roll_h, fill_tablier, stroke="#999"))
+        # Draw slats lines on the roll - Use consistent slat_h
+        # Start slightly offset so we see a line if space is tight
+        roll_y = axe_y + (slat_h * 0.5) 
+        while roll_y < axe_mid_y:
+            svg_parts.append(f'<line x1="{coulisse_w}" y1="{roll_y}" x2="{dw-coulisse_w}" y2="{roll_y}" style="{style_lame}" />')
+            roll_y += slat_h 
+            
+        # 2. VISIBLE TUBE on BOTTOM HALF (axe_mid_y to bottom of axis)
+        # Bottom half height is also roll_h basically
+        svg_parts.append(draw_rect(10, axe_mid_y, dw-20, roll_h, "#d0d0d0", stroke="#999"))
+        # Tube visual details
+        svg_parts.append(draw_rect(10, axe_mid_y+5, dw-20, 1, "#bbb"))
+        svg_parts.append(draw_rect(10, axe_mid_y+15, dw-20, 1, "#bbb"))
+        
+        # D. ATTACHES / CLIPS (On top of Tube)
+        nb_attaches = 2 if dw < 1200 else (3 if dw < 2000 else 4)
+        spacing = (dw - 20) / (nb_attaches + 1)
+        clip_w = 20
+        
+        for i in range(1, nb_attaches + 1):
+             cx = 10 + (spacing * i) - (clip_w / 2)
+             # Draw strap/clip crossing the tube/tablier junction
+             svg_parts.append(draw_rect(cx, axe_mid_y - 5, clip_w, 15, "#444")) # Clip body
+             svg_parts.append(draw_rect(cx+5, axe_mid_y - 12, 10, 8, "#222")) # Hook/Buckle
+
+    else:
+        # --- BOX VIEW (Standard) ---
+        # A. TABLIER (Below Box)
+        y_tablier = coffre_h
+        h_tablier_vis = dh - coffre_h
+        
+        svg_parts.append(f'<rect x="{coulisse_w}" y="{y_tablier}" width="{dw - (2*coulisse_w)}" height="{h_tablier_vis}" style="{style_tablier}" />')
+        
+        # Slats
+        lame_type = s.get('vr_lame_thick', '40 mm')
+        slat_h = 50 if "50" in lame_type else 40
+        curr_y = y_tablier + slat_h
+        while curr_y < dh - 20: 
+            svg_parts.append(f'<line x1="{coulisse_w}" y1="{curr_y}" x2="{dw-coulisse_w}" y2="{curr_y}" style="{style_lame}" />')
+            curr_y += slat_h
+            
+        # Lame Finale
+        svg_parts.append(f'<rect x="{coulisse_w}" y="{dh - 20}" width="{dw - (2*coulisse_w)}" height="20" fill="{get_color_hex(s.get("vr_col_lame_fin"), "#bcd")}" stroke="#888" />')
+
+        # B. COULISSES
+        svg_parts.append(f'<rect x="0" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />') # Left
+        svg_parts.append(f'<rect x="{dw - coulisse_w}" y="{coffre_h}" width="{coulisse_w}" height="{dh - coffre_h}" style="{style_coulisse}" />') # Right
+
+        # C. COFFRE (Box - Drawn LAST to cover top)
+        svg_parts.append(f'<rect x="0" y="0" width="{dw}" height="{coffre_h}" style="{style_coffre}" />')
     
     # Solar Panel
     if s.get('vr_proto') == "IO SOLAIRE":
         side = s.get('vr_cable_side', 'Droite')
-        sp_w = 400 # Fixed visual size for now, logic was broken with 'scale'
+        sp_w = 400 
         sp_h = 80 
         sp_y = (coffre_h - sp_h) / 2
         sp_x = (dw - sp_w - 50) if side == "Droite" else 50
         
-        svg += f'<rect x="{sp_x}" y="{sp_y}" width="{sp_w}" height="{sp_h}" fill="#2c3e50" stroke="#111" />'
-        svg += f'<line x1="{sp_x + sp_w/2}" y1="{sp_y}" x2="{sp_x + sp_w/2}" y2="{sp_y+sp_h}" stroke="#555" />'
+        svg_parts.append(f'<rect x="{sp_x}" y="{sp_y}" width="{sp_w}" height="{sp_h}" fill="#2c3e50" stroke="#111" />')
+        svg_parts.append(f'<line x1="{sp_x + sp_w/2}" y1="{sp_y}" x2="{sp_x + sp_w/2}" y2="{sp_y+sp_h}" stroke="#555" />')
 
     # Cable Exit
     if s.get('vr_type') == "Motorisé":
@@ -4176,8 +4298,8 @@ def generate_svg_volet():
         cx = dw if side == "Droite" else 0
         cy = coffre_h / 2
         d_cable = f"M{cx},{cy} Q{cx+15},{cy} {cx+15},{cy+15} T{cx+15},{cy+30}" if side == "Droite" else f"M{cx},{cy} Q{cx-15},{cy} {cx-15},{cy+15} T{cx-15},{cy+30}"
-        svg += f'<path d="{d_cable}" stroke="orange" stroke-width="3" fill="none" />'
-        svg += f'<circle cx="{cx}" cy="{cy}" r="3" fill="orange" />'
+        svg_parts.append(f'<path d="{d_cable}" stroke="orange" stroke-width="3" fill="none" />')
+        svg_parts.append(f'<circle cx="{cx}" cy="{cy}" r="3" fill="orange" />')
         
     # Crank
     if s.get('vr_type') == "Manuel":
@@ -4191,61 +4313,61 @@ def generate_svg_volet():
         cy_bot = cy_top + l_vis
         rod_x = (dw - 5) if side == "Droite" else 5
         
-        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
-        svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#666" stroke-width="5" stroke-linecap="round" />'
-        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
-        svg += f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />'
+        svg_parts.append(f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#666" stroke-width="5" stroke-linecap="round" />')
+        svg_parts.append(f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#666" stroke-width="5" stroke-linecap="round" />')
+        svg_parts.append(f'<line x1="{rod_x}" y1="{cy_top}" x2="{rod_x}" y2="{cy_bot}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />')
+        svg_parts.append(f'<line x1="{rod_x}" y1="{cy_bot}" x2="{rod_x + (10 if side=="Droite" else -10)}" y2="{cy_bot+10}" stroke="#f0f0f0" stroke-width="3" stroke-linecap="round" />')
 
         # Dimension Line for Crank
         dim_x = rod_x + (font_dim * 3 if side == "Droite" else -(font_dim * 3))
         
-        svg += f'<line x1="{dim_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_bot}" stroke="#444" stroke-width="1" />'
+        svg_parts.append(f'<line x1="{dim_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_bot}" stroke="#444" stroke-width="1" />')
         
         # Arrows for Crank
         ts = tick_size # shorthand
-        svg += f'<path d="M{dim_x-ts*0.5},{cy_top+ts} L{dim_x},{cy_top} L{dim_x+ts*0.5},{cy_top+ts}" fill="none" stroke="#444" />'
-        svg += f'<path d="M{dim_x-ts*0.5},{cy_bot-ts} L{dim_x},{cy_bot} L{dim_x+ts*0.5},{cy_bot-ts}" fill="none" stroke="#444" />'
+        svg_parts.append(f'<path d="M{dim_x-ts*0.5},{cy_top+ts} L{dim_x},{cy_top} L{dim_x+ts*0.5},{cy_top+ts}" fill="none" stroke="#444" />')
+        svg_parts.append(f'<path d="M{dim_x-ts*0.5},{cy_bot-ts} L{dim_x},{cy_bot} L{dim_x+ts*0.5},{cy_bot-ts}" fill="none" stroke="#444" />')
         
         # Text Label
         text_x = dim_x + (text_offset if side == "Droite" else -text_offset)
         text_y = cy_top + (l_vis / 2)
-        svg += f'<text x="{text_x}" y="{text_y}" text-anchor="middle" transform="rotate(-90, {text_x}, {text_y})" font-family="sans-serif" font-size="{font_dim}" fill="#444">{l_mm}</text>'
-        svg += f'<line x1="{rod_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_top}" stroke="#ccc" stroke-dasharray="2,2" />'
+        svg_parts.append(f'<text x="{text_x}" y="{text_y}" text-anchor="middle" transform="rotate(-90, {text_x}, {text_y})" font-family="sans-serif" font-size="{font_dim}" fill="#444">{l_mm}</text>')
+        svg_parts.append(f'<line x1="{rod_x}" y1="{cy_top}" x2="{dim_x}" y2="{cy_top}" stroke="#ccc" stroke-dasharray="2,2" />')
 
     # Box X cross
-    svg += f'<line x1="0" y1="0" x2="{dw}" y2="{coffre_h}" stroke="#ccc" />'
-    svg += f'<line x1="0" y1="{coffre_h}" x2="{dw}" y2="0" stroke="#ccc" />'
+    svg_parts.append(f'<line x1="0" y1="0" x2="{dw}" y2="{coffre_h}" stroke="#ccc" />')
+    svg_parts.append(f'<line x1="0" y1="{coffre_h}" x2="{dw}" y2="0" stroke="#ccc" />')
     
     # 4. Dimensions Arrows (FIXED PROPORTIONS)
     # Width (Bottom)
     dim_y_w = dh + (font_dim * 3.5) # Pushed down (was 2)
-    svg += f'<line x1="0" y1="{dim_y_w}" x2="{dw}" y2="{dim_y_w}" stroke="black" />'
+    svg_parts.append(f'<line x1="0" y1="{dim_y_w}" x2="{dw}" y2="{dim_y_w}" stroke="black" />')
     # Width Ticks
-    svg += f'<path d="M{tick_size},{dim_y_w-tick_size} L0,{dim_y_w} L{tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />'
-    svg += f'<path d="M{dw-tick_size},{dim_y_w-tick_size} L{dw},{dim_y_w} L{dw-tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />'
+    svg_parts.append(f'<path d="M{tick_size},{dim_y_w-tick_size} L0,{dim_y_w} L{tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />')
+    svg_parts.append(f'<path d="M{dw-tick_size},{dim_y_w-tick_size} L{dw},{dim_y_w} L{dw-tick_size},{dim_y_w+tick_size}" fill="none" stroke="black" />')
     # Width Text
-    svg += f'<text x="{dw/2}" y="{dim_y_w - text_offset}" text-anchor="middle" font-family="sans-serif" font-size="{font_dim*1.2}">{int(w)} mm</text>'
+    svg_parts.append(f'<text x="{dw/2}" y="{dim_y_w - text_offset}" text-anchor="middle" font-family="sans-serif" font-size="{font_dim*1.2}">{int(w)} mm</text>')
     
     # Height (Left)
     dim_x_h = -(font_dim * 3.5) # Pushed left (was 2)
-    svg += f'<line x1="{dim_x_h}" y1="0" x2="{dim_x_h}" y2="{dh}" stroke="black" />'
+    svg_parts.append(f'<line x1="{dim_x_h}" y1="0" x2="{dim_x_h}" y2="{dh}" stroke="black" />')
     # Height Ticks
-    svg += f'<path d="M{dim_x_h-tick_size},{tick_size} L{dim_x_h},0 L{dim_x_h+tick_size},{tick_size}" fill="none" stroke="black" />'
-    svg += f'<path d="M{dim_x_h-tick_size},{dh-tick_size} L{dim_x_h},{dh} L{dim_x_h+tick_size},{dh-tick_size}" fill="none" stroke="black" />'
+    svg_parts.append(f'<path d="M{dim_x_h-tick_size},{tick_size} L{dim_x_h},0 L{dim_x_h+tick_size},{tick_size}" fill="none" stroke="black" />')
+    svg_parts.append(f'<path d="M{dim_x_h-tick_size},{dh-tick_size} L{dim_x_h},{dh} L{dim_x_h+tick_size},{dh-tick_size}" fill="none" stroke="black" />')
     # Height Text
-    svg += f'<text x="{dim_x_h - text_offset}" y="{dh/2}" text-anchor="middle" transform="rotate(-90, {dim_x_h - text_offset}, {dh/2})" font-family="sans-serif" font-size="{font_dim*1.2}">{int(h)} mm</text>'
+    svg_parts.append(f'<text x="{dim_x_h - text_offset}" y="{dh/2}" text-anchor="middle" transform="rotate(-90, {dim_x_h - text_offset}, {dh/2})" font-family="sans-serif" font-size="{font_dim*1.2}">{int(h)} mm</text>')
     
     # Projection lines for dimensions
     # Vertical projections for Width Dim
-    svg += f'<line x1="0" y1="{dh}" x2="0" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />'
-    svg += f'<line x1="{dw}" y1="{dh}" x2="{dw}" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />'
+    svg_parts.append(f'<line x1="0" y1="{dh}" x2="0" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />')
+    svg_parts.append(f'<line x1="{dw}" y1="{dh}" x2="{dw}" y2="{dim_y_w}" stroke="#ccc" stroke-dasharray="4,4" />')
     # Horizontal projections for Height Dim
-    svg += f'<line x1="0" y1="0" x2="{dim_x_h}" y2="0" stroke="#ccc" stroke-dasharray="4,4" />'
-    svg += f'<line x1="0" y1="{dh}" x2="{dim_x_h}" y2="{dh}" stroke="#ccc" stroke-dasharray="4,4" />'
+    svg_parts.append(f'<line x1="0" y1="0" x2="{dim_x_h}" y2="0" stroke="#ccc" stroke-dasharray="4,4" />')
+    svg_parts.append(f'<line x1="0" y1="{dh}" x2="{dim_x_h}" y2="{dh}" stroke="#ccc" stroke-dasharray="4,4" />')
     
-    svg += '</g>'
+    svg_parts.append('</g>')
     
-    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" style="background-color:white;">{svg}</svg>'
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" style="background-color:white;">{"".join(svg_parts)}</svg>'
 
 def render_html_volet(s, svg_string, logo_b64):
     """Génération HTML pour Volet Roulant"""
@@ -4359,8 +4481,9 @@ def render_html_volet(s, svg_string, logo_b64):
                 <div class="panel">
                     <div class="panel-row"><span class="lbl">Repère</span> <span class="val">{ref_id}</span></div>
                     <div class="panel-row"><span class="lbl">Quantité</span> <span class="val">{s.get('vr_qte', 1)}</span></div>
+                    <div class="panel-row"><span class="lbl">Type de Coffre</span> <span class="val">{s.get('vr_type_coffre', '-')}</span></div>
                     <div class="panel-row"><span class="lbl">Type de côtes</span> <span class="val">{s.get('vr_dim_type', 'Côtes Tableau')}</span></div>
-                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">{s.get('vr_width', 0)} x {s.get('vr_height', 0)} mm</span></div>
+                    <div class="panel-row"><span class="lbl">Dimensions</span> <span class="val">L {s.get('vr_width', 0)} x H {s.get('vr_height', 0)} mm{" + enroulement" if s.get('vr_add_winding') else ""}</span></div>
                 </div>
             </div>
 
