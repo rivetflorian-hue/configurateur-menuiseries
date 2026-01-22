@@ -3357,6 +3357,15 @@ def render_menuiserie_form():
         # NOUVEAU: Côtes Tableau Extérieur (Sous VR)
         st.markdown("**(Optionnel) Côtes Tableau Extérieur**")
         c_te1, c_te2 = st.columns(2)
+        
+        # V8 FIX: Smart Defaults for Tableau (Tunnel/Gap)
+        # User Rule: If Frame=1000, Tableau=1020. (+20mm Total => +10mm Gap/Side)
+        if st.session_state.get('men_w_ex_in', 0) == 0:
+             st.session_state['men_w_ex_in'] = l_dos_dormant + 20
+        
+        if st.session_state.get('men_h_ex_in', 0) == 0:
+             st.session_state['men_h_ex_in'] = h_dos_dormant + 20
+
         st.session_state['men_w_tab_ex'] = c_te1.number_input("Largeur Tab. Ext.", value=st.session_state.get('men_w_tab_ex', 0), step=10, key="men_w_ex_in")
         st.session_state['men_h_tab_ex'] = c_te2.number_input("Hauteur Tab. Ext.", value=st.session_state.get('men_h_tab_ex', 0), step=10, key="men_h_ex_in")
         
@@ -3402,6 +3411,39 @@ def render_menuiserie_form():
     # 7. Observations
     with st.expander("📝 Observations", expanded=False):
          st.session_state['men_obs'] = st.text_area("Notes", value=st.session_state.get('men_obs', ''), key="men_obs_in")
+
+     # --- 8. VISUALISATION 3D ---
+    with st.expander("🖥️ Visualisation 3D 360°", expanded=False):
+        st.info("Visualisation 3D expérimentale (WebGL). Cliquez pour activer.")
+        if st.checkbox("Activer la vue 3D", key="view_3d_toggle"):
+            # Prepare Data
+            d_mm = 70
+            try:
+                ft = st.session_state.get('frame_thig', "70 mm")
+                d_mm = int(str(ft).replace('mm','').strip())
+            except: pass
+            
+            try:
+                import visualizer_3d
+                # Reload to ensure updates during dev
+                import importlib
+                importlib.reload(visualizer_3d)
+                
+                visualizer_3d.render_3d_menuiserie(
+                    width_mm=l_dos_dormant,
+                    height_mm=h_menuiserie,
+                    depth_mm=d_mm,
+                    frame_color=hex_col,
+                    glass_color="#aaddff",
+                    zones=zones_config,
+                    ext_reveal_w=st.session_state.get('men_w_tab_ex', 0),
+                    ext_reveal_h=st.session_state.get('men_h_tab_ex', 0),
+                    allege_mm=st.session_state.get('h_allege', 0)
+                )
+            except ImportError:
+                st.warning("Module visualizer_3d.py introuvable. Vérifiez que le fichier est présent dans le dossier.")
+            except Exception as e:
+                st.error(f"Erreur 3D : {e}")
 
      # --- ACTIONS ---
     st.markdown("### 💾 Actions")
