@@ -3398,6 +3398,7 @@ def render_menuiserie_form():
         col_int = st.session_state.get('col_in', 'Blanc')
         # col_ext = st.session_state.get('col_ex', 'Blanc')
         
+        
         color_map = {"Blanc": "#FFFFFF", "Gris": "#383E42", "Noir": "#1F1F1F", "Chêne": "#C19A6B"}
         hex_col = "#FFFFFF"
         for k, v in color_map.items():
@@ -3411,6 +3412,448 @@ def render_menuiserie_form():
     # 7. Observations
     with st.expander("📝 Observations", expanded=False):
          st.session_state['men_obs'] = st.text_area("Notes", value=st.session_state.get('men_obs', ''), key="men_obs_in")
+    
+    # --- MERGED VISUALIZER 3D LOGIC ---
+    import streamlit.components.v1 as components
+    
+    def render_3d_menuiserie(width_mm, height_mm, depth_mm=70, frame_color="#ffffff", glass_color="#aaddff", zones=[], 
+                             wall_depth=340, ext_reveal_w=0, ext_reveal_h=0, overlap=30, allege_mm=0):
+        """
+        Renders a 3D visualization.
+        FEATURES:
+        - CSG Wall Logic (Shape - Hole)
+        - Strict Z-Layering
+        - Allège (Sill Height) Support: Generates separate Floor and Wall extension.
+        - Sash logic: ensure adjacent sashes form a mullion.
+        """
+        
+        if ext_reveal_w <= 0: ext_reveal_w = width_mm - (2 * overlap)
+        if ext_reveal_h <= 0: ext_reveal_h = height_mm - overlap 
+        
+        # JSON data
+        data_json = json.dumps({
+            "width": width_mm,
+            "height": height_mm,
+            "depth": depth_mm,
+            "color": frame_color,
+            "glassColor": glass_color,
+            "zones": zones,
+            "wallDepth": wall_depth,
+            "revealW": ext_reveal_w,
+            "revealH": ext_reveal_h,
+            "overlap": overlap,
+            "allege": allege_mm
+        })
+    
+        html_code = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ margin: 0; overflow: hidden; background-color: #f0f2f6; }}
+                canvas {{ display: block; }}
+                #info {{
+                    position: absolute; top: 10px; width: 100%; text-align: center;
+                    font-family: sans-serif; font-size: 14px; color: #333; pointer-events: none;
+                }}
+                #err {{
+                    position: absolute; top: 40px; width: 100%; color: red; background: rgba(255,255,255,0.95); z-index: 1000; padding: 10px; text-align: center; display: none; border: 1px solid red;
+                }}
+            </style>
+            <script>
+                window.onerror = function(msg, url, line) {{
+                    const d = document.getElementById('err');
+                    d.style.display = 'block';
+                    d.innerHTML += "JS Error: " + msg + "<br/>Line: " + line + "<br/>Url: " + url + "<br/>";
+                    return false;
+                }};
+            </script>
+            <script type="importmap">
+                {{
+                    "imports": {{
+                        "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                        "three/examples/jsm/controls/OrbitControls": "https://unpkg.com/three@0.128.0/examples/jsm/controls/OrbitControls.js"
+                    }}
+                }}
+            </script>
+        </head>
+        <body>
+            <div id="err"></div>
+            <div id="info">Visualisation 3D (Configuration & Details) - v{datetime.datetime.now().strftime('%H:%M:%S')}</div>
+            
+            <script type="application/json" id="3d-data">
+                {data_json}
+            </script>
+    
+            <script type="module">
+                import * as THREE from 'three';
+                import {{ OrbitControls }} from 'three/examples/jsm/controls/OrbitControls';
+    
+                try {{
+                    const dataElement = document.getElementById('3d-data');
+                    if (!dataElement) throw new Error("Data element not found");
+                    const data = JSON.parse(dataElement.textContent);
+                    
+                    const scene = new THREE.Scene();
+                    scene.background = new THREE.Color(0xf0f2f6);
+                    
+                    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100000);
+                    camera.position.set(0, 1500, 6000);
+                    
+                    const renderer = new THREE.WebGLRenderer({{ antialias: true, alpha: true }});
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    renderer.shadowMap.enabled = true;
+                    renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+                    document.body.appendChild(renderer.domElement);
+                    
+                    const controls = new OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+                    controls.target.set(0, 0, 0);
+                    
+                    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                    scene.add(ambientLight);
+                    
+                    const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                    sunLight.position.set(1000, 2000, 2000);
+                    sunLight.castShadow = true;
+                    scene.add(sunLight);
+                     
+                    const backLight = new THREE.DirectionalLight(0xffffff, 0.3);
+                    backLight.position.set(0, 500, -2000);
+                    scene.add(backLight);
+                    
+                    // --- MATERIALS ---
+                    const frameMat = new THREE.MeshStandardMaterial({{ color: data.color, roughness: 0.5, metalness: 0.1, transparent: false, depthWrite: true }});
+                    const glassMat = new THREE.MeshPhysicalMaterial({{ color: data.glassColor, metalness: 0, roughness: 0, transmission: 0.9, transparent: true, opacity: 0.6, depthWrite: false }});
+                    
+                    const colorBeige = 0xe8dcc5; 
+                    const colorWhite = 0xffffff; 
+                    const colorConc = 0x999999; 
+                    const colorMetal = 0xdddddd; 
+                    const colorFloor = 0xdddddd;
+                    const colorIntWall = 0xD3C6A6; 
+                    
+                    const wallExtMat = new THREE.MeshStandardMaterial({{ color: colorBeige, roughness: 1, transparent: false, depthWrite: true }}); 
+                    const wallIntMat = new THREE.MeshStandardMaterial({{ color: colorIntWall, roughness: 0.5, transparent: false, depthWrite: true }}); 
+                    const sillMat = new THREE.MeshStandardMaterial({{ color: colorConc, roughness: 0.9, transparent: false, depthWrite: true }}); 
+                    const habillageMat = new THREE.MeshStandardMaterial({{ color: data.color, roughness: 0.5, metalness: 0.1, transparent: false, depthWrite: true }});
+                    const bavetteMat = new THREE.MeshStandardMaterial({{ color: 0xffffff, roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide, transparent: false, depthWrite: true }});
+                    const floorMat = new THREE.MeshStandardMaterial({{ color: colorFloor, roughness: 0.8, transparent: false, depthWrite: true }});
+    
+                    const rootGroup = new THREE.Group();
+                    scene.add(rootGroup);
+                    
+                    const fW = data.width;
+                    const fH = data.height;
+                    const fD = data.depth;       
+                    const frameW = 50;
+                    
+                    const wDepth = data.wallDepth;
+                    const holeW = data.revealW;
+                    const holeH = data.revealH;
+                    const allege = data.allege || 0;
+                    
+                    const wallCanvasW = Math.max(3000, holeW * 3);
+                    const wallCanvasH = Math.max(3000, (holeH + allege) * 2);
+    
+                    function createWallWithHole(fullW, fullH, cutW, cutH, depth, mat, shiftY) {{
+                        const shape = new THREE.Shape();
+                        shape.moveTo(-fullW/2, -fullH/2 + shiftY);
+                        shape.lineTo(-fullW/2, fullH/2 + shiftY);
+                        shape.lineTo(fullW/2, fullH/2 + shiftY);
+                        shape.lineTo(fullW/2, -fullH/2 + shiftY);
+                         shape.lineTo(-fullW/2, -fullH/2 + shiftY);
+                        
+                        const hole = new THREE.Path();
+                        hole.moveTo(-cutW/2, -cutH/2);
+                        hole.lineTo(cutW/2, -cutH/2);
+                        hole.lineTo(cutW/2, cutH/2);
+                        hole.lineTo(-cutW/2, cutH/2);
+                        hole.lineTo(-cutW/2, -cutH/2);
+                        shape.holes.push(hole);
+                        
+                        const geo = new THREE.ExtrudeGeometry(shape, {{ depth: depth, bevelEnabled: false }});
+                        const mesh = new THREE.Mesh(geo, mat);
+                        return mesh;
+                    }}
+    
+                    const winTopY = holeH/2;
+                    const winBotY = -holeH/2;
+                    const rejH = 40;
+                    const frameCenterY_World = winBotY + 15 + fH/2;
+                    
+                    const floorY = winBotY - allege;
+                    const roomHeight = 3000;
+                    const wallH = roomHeight;
+                    const wallCenterY = floorY + roomHeight/2;
+                    const fullWallDepth = wDepth; 
+                    const wallStartZ = -fullWallDepth; 
+                    const wallW = Math.max(4000, holeW * 4);
+                    
+                    const unifiedWallMesh = createWallWithHole(wallW, wallH, holeW, holeH, fullWallDepth, wallExtMat, wallCenterY);
+                    unifiedWallMesh.position.set(0, 0, wallStartZ);
+                    rootGroup.add(unifiedWallMesh);
+    
+                    // --- 3-PART SILL ---
+                    const upH = 15;
+                    const sillOffset = -5;
+                    const extension = 20; 
+                    const noseH = 50; 
+                    
+                    // MIDDLE
+                    const sShapeMid = new THREE.Shape();
+                    sShapeMid.moveTo(0, upH); 
+                    sShapeMid.lineTo(-fD, upH); 
+                    sShapeMid.lineTo(-fD, 0); 
+                    sShapeMid.lineTo(-(wDepth + extension), -10); 
+                    sShapeMid.lineTo(-(wDepth + extension), -noseH); 
+                    sShapeMid.lineTo(0, -noseH); 
+                    sShapeMid.lineTo(0, upH);
+                    
+                    const sGeoMid = new THREE.ExtrudeGeometry(sShapeMid, {{ depth: fW, bevelEnabled: false }});
+                    const sMeshMid = new THREE.Mesh(sGeoMid, sillMat);
+                    sMeshMid.rotation.y = -Math.PI/2;
+                    sMeshMid.position.set(fW/2, winBotY, sillOffset);
+                    rootGroup.add(sMeshMid);
+                    
+                    // SIDES
+                    const sideW = ((holeW + 60) - fW) / 2;
+                    const sShapeSide = new THREE.Shape();
+                    sShapeSide.moveTo(0, 0); 
+                    sShapeSide.lineTo(-fD, 0); 
+                    sShapeSide.lineTo(-(wDepth + extension), -10); 
+                    sShapeSide.lineTo(-(wDepth + extension), -noseH); 
+                    sShapeSide.lineTo(0, -noseH); 
+                    sShapeSide.lineTo(0, 0);
+                    
+                    const sGeoSide = new THREE.ExtrudeGeometry(sShapeSide, {{ depth: sideW, bevelEnabled: false }});
+                    
+                    const sMeshLeft = new THREE.Mesh(sGeoSide, sillMat);
+                    sMeshLeft.rotation.y = -Math.PI/2;
+                    const sMeshLeftPos = new THREE.Mesh(sGeoSide, sillMat);
+                    sMeshLeftPos.rotation.y = -Math.PI/2;
+                    sMeshLeftPos.position.set(-fW/2, winBotY, sillOffset);
+                    rootGroup.add(sMeshLeftPos);
+                    
+                    const sMeshRightPos = new THREE.Mesh(sGeoSide, sillMat);
+                    sMeshRightPos.rotation.y = -Math.PI/2;
+                    sMeshRightPos.position.set((holeW+60)/2, winBotY, sillOffset);
+                    rootGroup.add(sMeshRightPos);
+                    
+                    // DOUBLAGE FILLER
+                    const doubGeo = new THREE.BoxGeometry(holeW + 2, 65, 5);
+                    const doubMesh = new THREE.Mesh(doubGeo, wallExtMat);
+                    doubMesh.position.set(0, winBotY - 17.5, -2.5);
+                    rootGroup.add(doubMesh);
+                    
+                    const floorGeo = new THREE.PlaneGeometry(wallW, wallW);
+                    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+                    floorMesh.rotation.x = -Math.PI/2;
+                    floorMesh.position.set(0, floorY, 0);
+                    rootGroup.add(floorMesh);
+                    
+                    const ceilGeo = new THREE.PlaneGeometry(wallW, wallW);
+                    const ceilMesh = new THREE.Mesh(ceilGeo, wallExtMat); 
+                    ceilMesh.rotation.x = Math.PI/2;
+                    ceilMesh.position.set(0, floorY + roomHeight, 0);
+                    rootGroup.add(ceilMesh);
+                    
+                    const winGroup = new THREE.Group();
+                    winGroup.position.set(0, frameCenterY_World, -fD/2);
+                    rootGroup.add(winGroup);
+    
+                    // FRAMES
+                    const fLeftMesh = new THREE.Mesh(new THREE.BoxGeometry(frameW, fH, fD), frameMat);
+                    fLeftMesh.position.set(-fW/2 + frameW/2, 0, 0);
+                    winGroup.add(fLeftMesh);
+                    const fRightMesh = new THREE.Mesh(new THREE.BoxGeometry(frameW, fH, fD), frameMat);
+                    fRightMesh.position.set(fW/2 - frameW/2, 0, 0);
+                    winGroup.add(fRightMesh);
+                    const fTopMesh = new THREE.Mesh(new THREE.BoxGeometry(fW, frameW, fD), frameMat);
+                    fTopMesh.position.set(0, fH/2 - frameW/2, 0);
+                    winGroup.add(fTopMesh);
+                    const fBotMesh = new THREE.Mesh(new THREE.BoxGeometry(fW, frameW, fD), frameMat);
+                    fBotMesh.position.set(0, -fH/2 + frameW/2, 0);
+                    winGroup.add(fBotMesh);
+                    
+                    const wingS = 27; 
+                    const wingTh = 2;
+                    
+                    const ailTop = new THREE.Mesh(new THREE.BoxGeometry(fW + 2*wingS, wingS, wingTh), frameMat);
+                    ailTop.position.set(0, fH/2 + wingS/2, fD/2 + wingTh/2); 
+                    winGroup.add(ailTop);
+                    
+                    const ailLeft = new THREE.Mesh(new THREE.BoxGeometry(wingS, fH + 2*wingS, wingTh), frameMat);
+                    ailLeft.position.set(-fW/2 - wingS/2, 0, fD/2 + wingTh/2);
+                    winGroup.add(ailLeft);
+                    
+                    const ailRight = new THREE.Mesh(new THREE.BoxGeometry(wingS, fH + 2*wingS, wingTh), frameMat);
+                    ailRight.position.set(fW/2 + wingS/2, 0, fD/2 + wingTh/2);
+                    winGroup.add(ailRight);
+                    
+                    const ailBot = new THREE.Mesh(new THREE.BoxGeometry(fW + 2*wingS, wingS, wingTh), frameMat);
+                    ailBot.position.set(0, -fH/2 - wingS/2, fD/2 + wingTh/2);
+                    winGroup.add(ailBot);
+                    
+                    const wingThick = 2; const wingW = 20; const wingZ = fD/2 + wingThick/2;
+                    const wTopM = new THREE.Mesh(new THREE.BoxGeometry(fW, wingW, wingThick), frameMat);
+                    wTopM.position.set(0, fH/2 - wingW/2, wingZ);
+                    winGroup.add(wTopM);
+                    const wBotM = new THREE.Mesh(new THREE.BoxGeometry(fW, wingW, wingThick), frameMat);
+                    wBotM.position.set(0, -fH/2 + wingW/2, wingZ);
+                    winGroup.add(wBotM);
+                    const wLeftM = new THREE.Mesh(new THREE.BoxGeometry(wingW, fH, wingThick), frameMat);
+                    wLeftM.position.set(-fW/2 + wingW/2, 0, wingZ);
+                    winGroup.add(wLeftM);
+                    const wRightM = new THREE.Mesh(new THREE.BoxGeometry(wingW, fH, wingThick), frameMat);
+                    wRightM.position.set(fW/2 - wingW/2, 0, wingZ);
+                    winGroup.add(wRightM);
+    
+                    // --- SASHES & MULLIONS ---
+                    const drawSashFrame = (grp, w, h, depth, withGlass, handlePos) => {{
+                        const sP = 55;
+                        const shape = new THREE.Shape();
+                        shape.moveTo(-w/2, -h/2); shape.lineTo(w/2, -h/2); shape.lineTo(w/2, h/2); shape.lineTo(-w/2, h/2); shape.lineTo(-w/2, -h/2);
+                        const hole = new THREE.Path();
+                        hole.moveTo(-w/2+sP, -h/2+sP); hole.lineTo(w/2-sP, -h/2+sP); hole.lineTo(w/2-sP, h/2-sP); hole.lineTo(-w/2+sP, h/2-sP); hole.lineTo(-w/2+sP, -h/2+sP);
+                        shape.holes.push(hole);
+                        const geo = new THREE.ExtrudeGeometry(shape, {{ depth: depth, bevelEnabled: false }});
+                        const mesh = new THREE.Mesh(geo, frameMat); mesh.position.set(0, 0, -depth/2); grp.add(mesh);
+                        
+                        if (withGlass) {{
+                            const gl = new THREE.Mesh(new THREE.BoxGeometry(w - 2*sP, h - 2*sP, 6), glassMat); 
+                            grp.add(gl);
+                        }}
+                        
+                        if (handlePos) {{
+                            const hM = new THREE.Mesh(new THREE.BoxGeometry(20, 100, 20), new THREE.MeshStandardMaterial({{color: 0xeeeeee}}));
+                            let hX = 0, hY = 0;
+                            if (handlePos === 'left') hX = -w/2 + sP/2;
+                            else if (handlePos === 'right') hX = w/2 - sP/2;
+                            else if (handlePos === 'top') {{ hY = h/2 - sP/2; hM.rotation.z = Math.PI/2; }}
+                            hM.position.set(hX, hY, depth/2 + 10); 
+                            grp.add(hM);
+                        }}
+                    }};
+    
+                    if (data.zones && data.zones.length > 0) {{
+                        data.zones.forEach((zone, idx) => {{
+                            let sX = zone.x; let sY = zone.y; let sW = zone.w; let sH = zone.h;
+                            const tol = 1;
+                            if (sX < tol) {{ sX += frameW; sW -= frameW; }}
+                            if ((zone.x + zone.w) > fW - tol) {{ sW -= frameW; }}
+                            if (sY < tol) {{ sY += frameW; sH -= frameW; }}
+                            if ((zone.y + zone.h) > fH - tol) {{ sH -= frameW; }}
+    
+                            // MULLIONS
+                            if (zone.x > tol) {{
+                                const mul = new THREE.Mesh(new THREE.BoxGeometry(frameW, zone.h, fD), frameMat);
+                                const mX = (-fW/2) + zone.x;
+                                const mY = (fH/2) - (zone.y + zone.h/2);
+                                mul.position.set(mX, mY, 0);
+                                winGroup.add(mul);
+                                sX += frameW/2; sW -= frameW/2; 
+                            }}
+                            if (zone.y > tol) {{
+                                const tr = new THREE.Mesh(new THREE.BoxGeometry(zone.w, frameW, fD), frameMat);
+                                const tX = (-fW/2) + (zone.x + zone.w/2);
+                                const tY = (fH/2) - zone.y;
+                                tr.position.set(tX, tY, 0);
+                                winGroup.add(tr);
+                                sY += frameW/2; sH -= frameW/2;
+                            }}
+    
+                            let newW = sW; let newH = sH;
+                            if (newW <= 0 || newH <= 0) return;
+                            
+                            const zCenterX = (-fW/2) + sX + newW/2;
+                            const zCenterY = (fH/2) - sY - newH/2;
+                            
+                            const sGroup = new THREE.Group();
+                            sGroup.position.set(zCenterX, zCenterY, 0);
+                            winGroup.add(sGroup);
+                            
+                            const type = (zone.type || '').toLowerCase();
+                            const sD = fD - 10;
+                            
+                            if (type.includes('fixe')) {{
+                                drawSashFrame(sGroup, newW, newH, sD, true, null);
+                            }} else if (type.includes('coulissant')) {{
+                                const sashW = (newW / 2) + 20; 
+                                const lGrp = new THREE.Group(); lGrp.position.set(-newW/4, 0, -10); sGroup.add(lGrp);
+                                drawSashFrame(lGrp, sashW, newH, sD, true, 'right');
+                                const rGrp = new THREE.Group(); rGrp.position.set(newW/4, 0, 10); sGroup.add(rGrp);
+                                drawSashFrame(rGrp, sashW, newH, sD, true, 'left');
+                            }} else if (type.includes('soufflet')) {{
+                                drawSashFrame(sGroup, newW, newH, sD, true, 'top');
+                            }} else if (type.includes('2 vantaux') || type.includes('double')) {{
+                                const sashW = (newW / 2) - 2;
+                                const lGrp = new THREE.Group(); lGrp.position.set(-newW/4, 0, 0); sGroup.add(lGrp);
+                                drawSashFrame(lGrp, sashW, newH, sD, true, null);
+                                const rGrp = new THREE.Group(); rGrp.position.set(newW/4, 0, 0); sGroup.add(rGrp);
+                                drawSashFrame(rGrp, sashW, newH, sD, true, 'left');
+                                const batt = new THREE.Mesh(new THREE.BoxGeometry(40, newH, sD+5), frameMat);
+                                batt.position.set(0, 0, 5); sGroup.add(batt);
+                            }} else {{
+                                drawSashFrame(sGroup, newW, newH, sD, true, 'left');
+                            }}
+                        }});
+                    }}
+    
+                    // HABILLAGE
+                    const gapH = (holeW - fW);
+                    const gapTop = Math.max(0, holeH - 40 - fH);
+                    const habThick = 4;
+                    const habDepth = 40; 
+                    const habZ = -fD - habThick/2;
+                    
+                    const topH_Height = Math.max(habDepth, gapTop);
+                    const hTop = new THREE.Mesh(new THREE.BoxGeometry(holeW + 80, topH_Height, habThick), habillageMat);
+                    hTop.position.set(0, winTopY - topH_Height/2, habZ); 
+                    rootGroup.add(hTop);
+                    
+                    const gapSide = Math.max(0, gapH / 2);
+                    const cornierW = Math.max(habDepth, gapSide);
+                    
+                    const hLeft = new THREE.Mesh(new THREE.BoxGeometry(cornierW, holeH + topH_Height, habThick), habillageMat);
+                    hLeft.position.set(-fW/2 - cornierW/2, 0 + topH_Height/2 - habDepth/2, habZ); 
+                    rootGroup.add(hLeft);
+                    
+                    const hRight = new THREE.Mesh(new THREE.BoxGeometry(cornierW, holeH + topH_Height, habThick), habillageMat);
+                    hRight.position.set(fW/2 + cornierW/2, 0 + topH_Height/2 - habDepth/2, habZ);
+                    rootGroup.add(hRight);
+    
+                    const bavGeo = new THREE.PlaneGeometry(fW + 40, 60);
+                    const bav = new THREE.Mesh(bavGeo, bavetteMat);
+                    bav.rotation.x = 0.5; 
+                    bav.position.set(0, winBotY + 15 + 2, -fD - 20); 
+                    rootGroup.add(bav);
+    
+                    function animate() {{
+                        requestAnimationFrame(animate);
+                        controls.update();
+                        renderer.render(scene, camera);
+                    }}
+                    animate();
+                    
+                    window.addEventListener('resize', () => {{
+                        camera.aspect = window.innerWidth / window.innerHeight;
+                        camera.updateProjectionMatrix();
+                        renderer.setSize(window.innerWidth, window.innerHeight);
+                    }});
+                }} catch (e) {{
+                    const d = document.getElementById('err');
+                    d.style.display = 'block';
+                    d.innerHTML = "Init Error: " + e.message;
+                    console.error(e);
+                }}
+            </script>
+        </body>
+        </html>
+        """
+        
+        components.html(html_code, height=600, scrolling=False)
 
      # --- 8. VISUALISATION 3D ---
     with st.expander("🖥️ Visualisation 3D 360°", expanded=False):
@@ -3424,12 +3867,8 @@ def render_menuiserie_form():
             except: pass
             
             try:
-                import visualizer_3d
-                # Reload to ensure updates during dev
-                import importlib
-                importlib.reload(visualizer_3d)
-                
-                visualizer_3d.render_3d_menuiserie(
+                # Call local function directly (Merged)
+                render_3d_menuiserie(
                     width_mm=l_dos_dormant,
                     height_mm=h_menuiserie,
                     depth_mm=d_mm,
@@ -3440,8 +3879,6 @@ def render_menuiserie_form():
                     ext_reveal_h=st.session_state.get('men_h_tab_ex', 0),
                     allege_mm=st.session_state.get('h_allege', 0)
                 )
-            except ImportError:
-                st.warning("Module visualizer_3d.py introuvable. Vérifiez que le fichier est présent dans le dossier.")
             except Exception as e:
                 st.error(f"Erreur 3D : {e}")
 
